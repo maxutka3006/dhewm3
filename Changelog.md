@@ -7,7 +7,8 @@ Note: Numbers starting with a "#" like #330 refer to the bugreport with that num
 Fork Changes
 ------------------------------------------------------------------------
 * Added advanced debug menu (using console 'texture/bigchars' font) (toggled via F11 by default) 
-* Implemented free (debug) camera (also works in cinematics): via 'freeCam' command or 'dbg_freeCam' CVar (1: freeze the camera, 2: full flight mode)
+* Implemented free (debug) camera (also works in cinematics): via 'freeCam' command or 'dbg_freeCam' CVar (1: freeze the camera, 2: full flight mode) 
+* Added CVar 'pm_ignoreVacuum': Ignores the air/vacuum logic by forcing 'newAirless' to false. Additionally, freeCam 2 (flight mode) now also forces this variable to false.
 
 
 1.5.5 (2026-06-08)
