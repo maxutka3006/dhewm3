@@ -6237,10 +6237,11 @@ void idPlayer::UpdateAir( void ) {
 		}
 	}
 
-	// DEBUG free camera: while the free camera is on, the player must not breathe - the airless
+	// DEBUG free camera: while the free camera (flight mode) is on, the player must not breathe - the airless
 	// state is forced off, so airTics does not drain, damage_noair never fires and the oxygen
-	// HUD does not come up. Turning the camera off inside a vacuum is a normal re-entry
-	if (freeCamMode > 0) {
+	// HUD does not come up (also the sounds). Turning the camera off inside a vacuum is a normal re-entry
+	// And... human-written comment: Also, 'pm_ignoreVacuum' CVar forces it to 'false' too, as evaluated above.
+	if ( pm_ignoreVacuum.GetBool() || freeCamMode == 2 ) {
 		newAirless = false;
 	}
 
