@@ -224,6 +224,13 @@ public:
 	bool					noclip;
 	bool					godmode;
 
+	// DEBUG free camera, see the dbg_freeCam* cvars
+	idVec3					freeCamOrigin;			// point the view is pinned to
+	idAngles				freeCamAngles;			// orientation of the pinned view
+	idAngles				freeCamLastCmdAngles;	// last raw usercmd angles, for mouse/turn deltas
+	int						freeCamMode;			// last seen dbg_freeCam value, a change re-anchors
+	bool					freeCamAnchorSet;
+
 	bool					spawnAnglesSet;		// on first usercmd, we must set deltaAngles
 	idAngles				spawnAngles;
 	idAngles				viewAngles;			// player view angles
@@ -364,6 +371,13 @@ public:
 	void					CacheWeapons( void );
 
 	void					EnterCinematic( void );
+
+	bool					FreeCamActive( void ) const;
+	bool					FreeCamFlying( void ) const;
+	void					FreeCamSyncCmdAngles( void );
+	void					FreeCamAnchor( void );
+	void					FreeCamFly( void );
+	bool					FreeCamGetView( renderView_t *view );
 	void					ExitCinematic( void );
 	bool					HandleESC( void );
 	bool					SkipCinematic( void );

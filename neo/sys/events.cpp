@@ -33,6 +33,7 @@ If you have questions concerning this license or the applicable additional terms
 #include "idlib/Heap.h"
 #include "framework/Common.h"
 #include "framework/Console.h"
+#include "framework/DebugMenu.h"
 #include "framework/KeyInput.h"
 #include "framework/Session_local.h"
 #include "renderer/RenderSystem.h"
@@ -1759,6 +1760,17 @@ static void handleMouseGrab() {
 			grabMouse = false; // TODO: or still grab to window? (maybe only if in exclusive fullscreen mode?)
 			enableTextInput = true;
 		} else if ( console->Active() ) {
+			showCursor = true;
+			relativeMouse = grabMouse = false;
+			enableTextInput = true;
+		} else if ( debugMenu != NULL && debugMenu->Active() ) {
+			// the in-game debug menu has a filter/values field one types into, so it
+			// needs SDL text input: without GRAB_ENABLETEXTINPUT SDL generates no
+			// SDL_TEXTINPUT events and therefore no SE_CHAR events reach the menu
+			// while the game is running (in the main menu and in the console it
+			// worked, because those enable text input anyway).
+			// Like the console it releases the mouse, and the menu swallows all key
+			// and mouse events itself, so the view keeps still while it is open.
 			showCursor = true;
 			relativeMouse = grabMouse = false;
 			enableTextInput = true;

@@ -956,6 +956,11 @@ idPlayer::idPlayer() {
 	memset( &usercmd, 0, sizeof( usercmd ) );
 
 	noclip					= false;
+	freeCamMode				= 0;
+	freeCamAnchorSet		= false;
+	freeCamOrigin.Zero();
+	freeCamAngles.Zero();
+	freeCamLastCmdAngles.Zero();
 	godmode					= false;
 
 	spawnAnglesSet			= false;
@@ -2660,7 +2665,10 @@ idPlayer::EnterCinematic
 ===============
 */
 void idPlayer::EnterCinematic( void ) {
-	Hide();
+	// DEBUG free camera: keep the player model visible if the debug view is on
+	if ( !( FreeCamActive() && dbg_freeCam_visible.GetInteger() != 0 ) ) {
+		Hide();
+	}
 	StopAudioLog();
 	StopSound( SND_CHANNEL_PDA, false );
 	if ( hud ) {
@@ -4879,6 +4887,126 @@ void idPlayer::SetViewAngles( const idAngles &angles ) {
 }
 
 /*
+==================
+Debug free camera
+
+dbg_freeCam 0 = off, 1 = the view is pinned where it is, 2 = pinned and flown with the
+movement keys and the mouse. The player keeps playing as usual in mode 1 (mode 2 freezes the
+body in place) and the cinematic path is left alone on purpose: idGameLocal::SetCamera,
+idPlayer::EnterCinematic and the .md5camera anims keep running, the debug view just refuses
+to take their POV (dbg_freeCam_cine 0) or steps aside while a camera owns the view (1).
+==================
+*/
+bool idPlayer::FreeCamActive( void ) const {
+	if ( dbg_freeCam.GetInteger() <= 0 ) {
+		return false;
+	}
+	// a cinematic camera owns the view while it runs, unless forced the other way
+	if ( gameLocal.GetCamera() != NULL && dbg_freeCam_cine.GetInteger() != 0 ) {
+		return false;
+	}
+	return true;
+}
+
+bool idPlayer::FreeCamFlying( void ) const {
+	return ( dbg_freeCam.GetInteger() >= 2 ) && FreeCamActive() && freeCamAnchorSet;
+}
+
+// the raw usercmd angles are absolute, so the frame to frame difference is the mouse/turn motion
+void idPlayer::FreeCamSyncCmdAngles( void ) {
+	const usercmd_t &cmd = gameLocal.usercmds[ entityNumber ];
+	for ( int i = 0; i < 3; i++ ) {
+		freeCamLastCmdAngles[ i ] = SHORT2ANGLE( cmd.angles[ i ] );
+	}
+}
+
+// pin the anchor to the player's own eye - used when there was no previous renderView to
+// take the point from (right after a savegame load for instance)
+void idPlayer::FreeCamAnchor( void ) {
+	freeCamOrigin = firstPersonViewOrigin;
+	freeCamAngles = firstPersonViewAxis.ToAngles();
+	freeCamAnchorSet = true;
+	FreeCamSyncCmdAngles();
+	UpdatePVSAreas( freeCamOrigin );
+}
+
+void idPlayer::FreeCamFly( void ) {
+	const usercmd_t &cmd = gameLocal.usercmds[ entityNumber ];
+	idAngles cmdAngles;
+	idMat3 axis;
+	idVec3 dir;
+	int i;
+
+	if ( !FreeCamFlying() ) {
+		return;
+	}
+
+	// idPlayer::usercmd has its moves zeroed while a cinematic or an influence is running,
+	// so take the command from the game instead of from the player's own copy
+	for ( i = 0; i < 3; i++ ) {
+		cmdAngles[ i ] = SHORT2ANGLE( cmd.angles[ i ] );
+	}
+
+	// angles: accumulate the turn deltas, so the anchor keeps an orientation of its own
+	if ( dbg_freeCam_look.GetInteger() != 0 ) {
+		for ( i = 0; i < 3; i++ ) {
+			// AngleDelta( a, b ) is already the normalized a - b, so it wraps across +-180 on its own
+			freeCamAngles[ i ] = idMath::AngleNormalize180( freeCamAngles[ i ] + idMath::AngleDelta( cmdAngles[ i ], freeCamLastCmdAngles[ i ] ) );
+		}
+		if ( freeCamAngles.pitch > 89.0f ) {
+			freeCamAngles.pitch = 89.0f;
+		} else if ( freeCamAngles.pitch < -89.0f ) {
+			freeCamAngles.pitch = -89.0f;
+		}
+	}
+	for ( i = 0; i < 3; i++ ) {
+		freeCamLastCmdAngles[ i ] = cmdAngles[ i ];
+	}
+
+	// position: fly along the anchor's own axes (axis[0] forward, axis[1] left, axis[2] up)
+	dir = idVec3( (float)cmd.forwardmove, -(float)cmd.rightmove, (float)cmd.upmove );
+	if ( dir.LengthSqr() > 0.0f ) {
+		dir.Normalize();
+		axis = freeCamAngles.ToMat3();
+		freeCamOrigin += ( axis[ 0 ] * dir.x + axis[ 1 ] * dir.y + axis[ 2 ] * dir.z ) * ( dbg_freeCam_speed.GetFloat() * idMath::M_MS2SEC * (float)gameLocal.msecPrecise );
+	}
+}
+
+// returns true when the debug camera produced the view for this frame
+bool idPlayer::FreeCamGetView( renderView_t *view ) {
+	if ( !FreeCamActive() ) {
+		return false;
+	}
+	if ( !freeCamAnchorSet ) {
+		FreeCamAnchor();
+	}
+
+	// the cinematic camera still has to be advanced even though we are not using its POV:
+	// GetViewParms() is what ends the anim, wakes the scripted thread up and can chain into
+	// the next camera - idCameraAnim::Think() only covers the skipping case
+	if ( privateCameraView != NULL || gameLocal.GetCamera() != NULL ) {
+		renderView_t cineView;
+		memset( &cineView, 0, sizeof( cineView ) );
+		if ( privateCameraView != NULL ) {
+			privateCameraView->GetViewParms( &cineView );
+		} else {
+			gameLocal.GetCamera()->GetViewParms( &cineView );
+		}
+	}
+
+	view->vieworg = freeCamOrigin;
+	view->viewaxis = freeCamAngles.ToMat3();
+	// viewID 0 means "not the player's eyes": the own body is drawn and no first person weapon
+	view->viewID = dbg_freeCam_body.GetInteger() ? 0 : entityNumber + 1;
+	gameLocal.CalcFov( CalcFov( true ), view->fov_x, view->fov_y );
+
+	// same as the camera path does for its own view point
+	UpdatePVSAreas( freeCamOrigin );
+
+	return true;
+}
+
+/*
 ================
 idPlayer::UpdateViewAngles
 ================
@@ -4886,6 +5014,15 @@ idPlayer::UpdateViewAngles
 void idPlayer::UpdateViewAngles( void ) {
 	int i;
 	idAngles delta;
+
+	// DEBUG free camera: while the camera is flying, the mouse drives it and nothing else, so
+	// the usercmd angles must not reach the body. Same trick as the cinematic branch below:
+	// no view changes at all, but the deltas are kept in sync so the view does not snap when
+	// the fly is switched off again
+	if ( FreeCamFlying() ) {
+		UpdateDeltaViewAngles( viewAngles );
+		return;
+	}
 
 	if ( !noclip && ( gameLocal.inCinematic || privateCameraView || gameLocal.GetCamera() || influenceActive == INFLUENCE_LEVEL2 || objectiveSystemOpen ) ) {
 		// no view changes at all, but we still want to update the deltas or else when
@@ -5085,6 +5222,13 @@ void idPlayer::UpdateAir( void ) {
 			}
 			newAirless = gameRenderWorld->AreasAreConnected( gameLocal.vacuumAreaNum, areaNum, PS_BLOCK_AIR );
 		}
+	}
+
+	// DEBUG free camera: while the free camera is on, the player must not breathe - the airless
+	// state is forced off, so airTics does not drain, damage_noair never fires and the oxygen
+	// HUD does not come up. Turning the camera off inside a vacuum is a normal re-entry
+	if (freeCamMode > 0) {
+		newAirless = false;
 	}
 
 	if ( newAirless ) {
@@ -5959,7 +6103,11 @@ void idPlayer::Move( void ) {
 	physicsObj.SetMaxStepHeight( pm_stepsize.GetFloat() );
 	physicsObj.SetMaxJumpHeight( pm_jumpheight.GetFloat() );
 
-	if ( noclip ) {
+	if ( FreeCamFlying() ) {
+		// the debug camera is flying: hold the body where it is
+		physicsObj.SetContents( CONTENTS_BODY );
+		physicsObj.SetMovementType( PM_FREEZE );
+	} else if ( noclip ) {
 		physicsObj.SetContents( 0 );
 		physicsObj.SetMovementType( PM_NOCLIP );
 	} else if ( spectating ) {
@@ -6219,6 +6367,13 @@ void idPlayer::Think( void ) {
 	usercmd = gameLocal.usercmds[ entityNumber ];
 	buttonMask &= usercmd.buttons;
 	usercmd.buttons &= ~buttonMask;
+
+	// DEBUG free camera: a change of mode re-anchors it at the current view, mode 2 flies it
+	if ( freeCamMode != dbg_freeCam.GetInteger() ) {
+		freeCamMode = dbg_freeCam.GetInteger();
+		freeCamAnchorSet = false;
+	}
+	FreeCamFly();
 
 	if ( gameLocal.inCinematic && gameLocal.skipCinematic ) {
 		return;
@@ -7330,7 +7485,19 @@ void idPlayer::CalculateRenderView( void ) {
 
 	if ( !renderView ) {
 		renderView = new renderView_t;
+		memset( renderView, 0, sizeof( *renderView ) );
 	}
+
+	// DEBUG free camera: turning it on pins the view that is on screen right now, whoever
+	// produced it - the player's eye or a cinematic camera in the middle of a cut
+	if ( dbg_freeCam.GetInteger() > 0 && !freeCamAnchorSet && renderView->time != 0 && renderView->viewaxis[ 0 ].LengthSqr() > 0.0f ) {
+		freeCamOrigin = renderView->vieworg;
+		freeCamAngles = renderView->viewaxis.ToAngles();
+		freeCamAnchorSet = true;
+		FreeCamSyncCmdAngles();
+		UpdatePVSAreas( freeCamOrigin );
+	}
+
 	memset( renderView, 0, sizeof( *renderView ) );
 
 	// copy global shader parms
@@ -7348,7 +7515,9 @@ void idPlayer::CalculateRenderView( void ) {
 	renderView->viewID = 0;
 
 	// check if we should be drawing from a camera's POV
-	if ( !noclip && (gameLocal.GetCamera() || privateCameraView) ) {
+	if ( FreeCamGetView( renderView ) ) {
+		// the debug free camera produced the view (see dbg_freeCam*)
+	} else if ( !noclip && (gameLocal.GetCamera() || privateCameraView) ) {
 		// get origin, axis, and fov
 		if ( privateCameraView ) {
 			privateCameraView->GetViewParms( renderView );

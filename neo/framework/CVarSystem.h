@@ -226,6 +226,10 @@ public:
 							// Returns NULL if there is no CVar with the given name.
 	virtual idCVar *		Find( const char *name ) = 0;
 
+						// dhewm3 debug menu: index based access to all registered CVars
+	virtual int				GetNumCVars( void ) const { return 0; }
+	virtual const idCVar *	GetCVarByIndex( int index ) const { (void)index; return NULL; }
+
 							// Sets the value of a CVar by name.
 	virtual void			SetCVarString( const char *name, const char *value, int flags = 0 ) = 0;
 	virtual void			SetCVarBool( const char *name, const bool value, int flags = 0 ) = 0;

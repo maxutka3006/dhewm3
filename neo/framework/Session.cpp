@@ -31,6 +31,7 @@ If you have questions concerning this license or the applicable additional terms
 #include "idlib/LangDict.h"
 #include "framework/async/AsyncNetwork.h"
 #include "framework/Console.h"
+#include "framework/DebugMenu.h"
 #include "framework/Game.h"
 #include "framework/EventLoop.h"
 #include "renderer/ModelManager.h"
@@ -2276,6 +2277,11 @@ idSessionLocal::ProcessEvent
 ===============
 */
 bool idSessionLocal::ProcessEvent( const sysEvent_t *event ) {
+	// let the in-game debug menu take the event first
+	if ( debugMenu->ProcessEvent( event ) ) {
+		return true;
+	}
+
 	// hitting escape anywhere brings up the menu
 	// DG: but shift-escape should bring up console instead so ignore that
 	if ( !guiActive && event->evType == SE_KEY && event->evValue2 == 1
@@ -2590,6 +2596,9 @@ void idSessionLocal::Draw() {
 	if ( !fullConsole ) {
 		console->Draw( false );
 	}
+
+	// draw the in-game debug menu above everything else
+	debugMenu->Draw();
 }
 
 /*

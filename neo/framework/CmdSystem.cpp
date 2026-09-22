@@ -61,6 +61,10 @@ public:
 	virtual void			AddCommand( const char *cmdName, cmdFunction_t function, int flags, const char *description, argCompletion_t argCompletion = NULL );
 	virtual void			RemoveCommand( const char *cmdName );
 	virtual void			RemoveFlaggedCommands( int flags );
+	virtual int				GetNumCommands( void ) const;
+	virtual const char *	GetCommandName( int index ) const;
+	virtual int				GetCommandFlags( int index ) const;
+	virtual const char *	GetCommandDescription( int index ) const;
 
 	virtual void			CommandCompletion( void(*callback)( const char *s ) );
 	virtual void			ArgCompletion( const char *cmdString, void(*callback)( const char *s ) );
@@ -427,6 +431,75 @@ void idCmdSystemLocal::RemoveFlaggedCommands( int flags ) {
 		}
 		last = &cmd->next;
 	}
+}
+
+/*
+============
+idCmdSystemLocal::GetNumCommands
+
+Used by the in-game debug menu to iterate over all registered commands.
+============
+*/
+int idCmdSystemLocal::GetNumCommands( void ) const {
+	int num = 0;
+	for ( commandDef_t *cmd = commands; cmd; cmd = cmd->next ) {
+		num++;
+	}
+	return num;
+}
+
+/*
+============
+idCmdSystemLocal::GetCommandName
+============
+*/
+const char *idCmdSystemLocal::GetCommandName( int index ) const {
+	if ( index < 0 ) {
+		return NULL;
+	}
+	commandDef_t *cmd = commands;
+	while ( cmd && index > 0 ) {
+		cmd = cmd->next;
+		index--;
+	}
+	return cmd ? cmd->name : NULL;
+}
+
+/*
+============
+idCmdSystemLocal::GetCommandFlags
+============
+*/
+int idCmdSystemLocal::GetCommandFlags( int index ) const {
+	if ( index < 0 ) {
+		return 0;
+	}
+	commandDef_t *cmd = commands;
+	while ( cmd && index > 0 ) {
+		cmd = cmd->next;
+		index--;
+	}
+	return cmd ? cmd->flags : 0;
+}
+
+/*
+============
+idCmdSystemLocal::GetCommandDescription
+============
+*/
+const char *idCmdSystemLocal::GetCommandDescription( int index ) const {
+	if ( index < 0 ) {
+		return NULL;
+	}
+	commandDef_t *cmd = commands;
+	while ( cmd && index > 0 ) {
+		cmd = cmd->next;
+		index--;
+	}
+	if ( !cmd ) {
+		return NULL;
+	}
+	return cmd->description ? cmd->description : "";
 }
 
 /*

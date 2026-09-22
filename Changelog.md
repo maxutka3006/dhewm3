@@ -4,6 +4,12 @@ dhewm3 Changelog
 Note: Numbers starting with a "#" like #330 refer to the bugreport with that number
       at https://github.com/dhewm/dhewm3/issues/
 
+Fork Changes
+------------------------------------------------------------------------
+* Added advanced debug menu (using console 'texture/bigchars' font) (toggled via F11 by default) 
+* Implemented free (debug) camera (also works in cinematics): via 'freeCam' command or 'dbg_freeCam' CVar (1: freeze the camera, 2: full flight mode)
+
+
 1.5.5 (2026-06-08)
 ------------------------------------------------------------------------
 

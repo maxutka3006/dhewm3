@@ -43,6 +43,7 @@ If you have questions concerning this license or the applicable additional terms
 #include "framework/BuildVersion.h"
 #include "framework/Licensee.h"
 #include "framework/Console.h"
+#include "framework/DebugMenu.h"
 #include "framework/Session.h"
 #include "framework/Game.h"
 #include "framework/KeyInput.h"
@@ -3118,6 +3119,9 @@ void idCommonLocal::Init( int argc, char **argv ) {
 		// init the console so we can take prints
 		console->Init();
 
+		// init the in-game debug menu
+		debugMenu->Init();
+
 		// get architecture info
 		Sys_Init();
 
@@ -3207,6 +3211,9 @@ void idCommonLocal::Shutdown( void ) {
 	// shut down the console
 	console->Shutdown();
 
+	// shut down the in-game debug menu
+	debugMenu->Shutdown();
+
 	// shut down the key system
 	idKeyInput::Shutdown();
 
@@ -3280,6 +3287,9 @@ void idCommonLocal::InitGame( void ) {
 
 	// load the font, etc
 	console->LoadGraphics();
+
+	// let the debug menu find the bigchars font
+	debugMenu->LoadGraphics();
 
 	// init journalling, etc
 	eventLoop->Init();

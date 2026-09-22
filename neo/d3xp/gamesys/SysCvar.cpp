@@ -418,3 +418,17 @@ idCVar g_xp_bind_run_once( "g_xp_bind_run_once", "0", CVAR_GAME | CVAR_BOOL | CV
 idCVar net_serverDownload(			"net_serverDownload",		"0",			CVAR_GAME | CVAR_INTEGER | CVAR_ARCHIVE, "enable server download redirects. 0: off 1: redirect to si_serverURL 2: use builtin download. see net_serverDl cvars for configuration" );
 idCVar net_serverDlBaseURL(			"net_serverDlBaseURL",		"",				CVAR_GAME | CVAR_ARCHIVE, "base URL for the download redirection" );
 idCVar net_serverDlTable(			"net_serverDlTable",		"",				CVAR_GAME | CVAR_ARCHIVE, "pak names for which download is provided, separated by ;" );
+
+// --------------------------------------------------------------------------
+// debug free camera: freeze the view where it is and/or fly it around.
+// Deliberately nothing of the cinematic path (idGameLocal::SetCamera,
+// idPlayer::EnterCinematic, the .md5camera anims and their camera cuts) is
+// touched - the debug view only refuses to take their POV, or steps aside
+// while a cinematic camera owns the view, depending on dbg_freeCam_cine.
+// --------------------------------------------------------------------------
+idCVar dbg_freeCam(					"dbg_freeCam",				"0",			CVAR_GAME | CVAR_INTEGER | CVAR_CHEAT, "debug camera: 0 = off, 1 = freeze the view where it is, 2 = freeze + fly (the player body stays put)" );
+idCVar dbg_freeCam_cine(			"dbg_freeCam_cine",			"0",			CVAR_GAME | CVAR_INTEGER | CVAR_CHEAT, "1 = a cinematic camera owns the view while it runs and the freeze resumes after it, 0 = the frozen view always wins" );
+idCVar dbg_freeCam_look(			"dbg_freeCam_look",			"1",			CVAR_GAME | CVAR_INTEGER | CVAR_CHEAT, "1 = mouse look turns the frozen camera (cinematics included), 0 = its angles are pinned as well" );
+idCVar dbg_freeCam_body(			"dbg_freeCam_body",			"1",			CVAR_GAME | CVAR_INTEGER | CVAR_CHEAT, "1 = eye detached from the player: own body is drawn, no first-person weapon (viewID 0)" );
+idCVar dbg_freeCam_speed(			"dbg_freeCam_speed",		"400",			CVAR_GAME | CVAR_FLOAT | CVAR_CHEAT, "fly speed of the frozen camera in units per second" );
+idCVar dbg_freeCam_visible(			"dbg_freeCam_visible",		"1",			CVAR_GAME | CVAR_INTEGER | CVAR_CHEAT, "1 = don't hide the player model when a cinematic starts while the debug camera is on" );

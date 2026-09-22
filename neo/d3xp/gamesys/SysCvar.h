@@ -33,6 +33,13 @@ If you have questions concerning this license or the applicable additional terms
 
 extern idCVar	developer;
 
+extern idCVar	dbg_freeCam;
+extern idCVar	dbg_freeCam_cine;
+extern idCVar	dbg_freeCam_look;
+extern idCVar	dbg_freeCam_body;
+extern idCVar	dbg_freeCam_speed;
+extern idCVar	dbg_freeCam_visible;
+
 extern idCVar	g_cinematic;
 extern idCVar	g_cinematicMaxSkipTime;
 

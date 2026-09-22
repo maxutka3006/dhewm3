@@ -85,6 +85,12 @@ public:
 						// Remove all commands with one of the flags set.
 	virtual void		RemoveFlaggedCommands( int flags ) = 0;
 
+						// dhewm3 debug menu: index based access to all registered commands
+	virtual int				GetNumCommands( void ) const { return 0; }
+	virtual const char *	GetCommandName( int index ) const { (void)index; return NULL; }
+	virtual int				GetCommandFlags( int index ) const { (void)index; return 0; }
+	virtual const char *	GetCommandDescription( int index ) const { (void)index; return NULL; }
+
 						// Command and argument completion using callback for each valid string.
 	virtual void		CommandCompletion( void(*callback)( const char *s ) ) = 0;
 	virtual void		ArgCompletion( const char *cmdString, void(*callback)( const char *s ) ) = 0;

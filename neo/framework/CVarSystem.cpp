@@ -434,6 +434,8 @@ public:
 	virtual void			Register( idCVar *cvar );
 
 	virtual idCVar *		Find( const char *name );
+	virtual int				GetNumCVars( void ) const;
+	virtual const idCVar *	GetCVarByIndex( int index ) const;
 
 	virtual void			SetCVarString( const char *name, const char *value, int flags = 0 );
 	virtual void			SetCVarBool( const char *name, const bool value, int flags = 0 );
@@ -640,6 +642,29 @@ idCVarSystemLocal::Find
 */
 idCVar *idCVarSystemLocal::Find( const char *name ) {
 	return FindInternal( name );
+}
+
+/*
+============
+idCVarSystemLocal::GetNumCVars
+
+Used by the in-game debug menu to iterate over all registered CVars.
+============
+*/
+int idCVarSystemLocal::GetNumCVars( void ) const {
+	return cvars.Num();
+}
+
+/*
+============
+idCVarSystemLocal::GetCVarByIndex
+============
+*/
+const idCVar *idCVarSystemLocal::GetCVarByIndex( int index ) const {
+	if ( index < 0 || index >= cvars.Num() ) {
+		return NULL;
+	}
+	return cvars[index];
 }
 
 /*

@@ -31,6 +31,7 @@ If you have questions concerning this license or the applicable additional terms
 #include "framework/async/AsyncNetwork.h"
 #include "framework/FileSystem.h"
 #include "framework/Console.h"
+#include "framework/DebugMenu.h"
 #include "framework/Game.h"
 #include "sound/sound.h"
 #include "ui/UserInterface.h"
@@ -1231,7 +1232,9 @@ void idSessionLocal::GuiFrameEvents() {
 
 	// stop generating move and button commands when a local console or menu is active
 	// running here so SP, async networking and no game all go through it
-	if ( console->Active() || guiActive ) {
+	// the debug menu takes the player input too: its keys arrive in usercmdGen
+	// from the raw SDL keyboard buffer (Sys_PollKeyboardInputEvents), not the
+	if ( console->Active() || guiActive || ( debugMenu != NULL && debugMenu->Active() ) ) {
 		usercmdGen->InhibitUsercmd( INHIBIT_SESSION, true );
 	} else {
 		usercmdGen->InhibitUsercmd( INHIBIT_SESSION, false );

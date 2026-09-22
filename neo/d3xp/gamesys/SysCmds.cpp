@@ -507,6 +507,53 @@ void Cmd_Notarget_f( const idCmdArgs &args ) {
 
 /*
 ==================
+Cmd_FreeCam_f
+
+argv(0) freeCam
+argv(1) 0 | 1 | 2 | here | pos <x> <y> <z> | angles <pitch> <yaw> <roll> | speed <units/sec>
+
+Pins the debug view where it is right now (1) or lets it be flown with the movement keys
+and the mouse (2). The cinematic machinery keeps running untouched, see dbg_freeCam_cine.
+==================
+*/
+void Cmd_FreeCam_f( const idCmdArgs &args ) {
+	idPlayer	*player;
+
+	player = gameLocal.GetLocalPlayer();
+	if ( !player || !gameLocal.CheatsOk() ) {
+		return;
+	}
+
+	if ( args.Argc() >= 2 ) {
+		const char *cmd = args.Argv( 1 );
+
+		if ( !idStr::Icmp( cmd, "0" ) || !idStr::Icmp( cmd, "1" ) || !idStr::Icmp( cmd, "2" ) ) {
+			dbg_freeCam.SetInteger( atoi( cmd ) );
+		} else if ( !idStr::Icmp( cmd, "here" ) ) {
+			player->freeCamAnchorSet = false;		// re-anchor at the view that is on screen right now
+		} else if ( !idStr::Icmp( cmd, "pos" ) && args.Argc() == 5 ) {
+			player->freeCamOrigin = idVec3( atof( args.Argv( 2 ) ), atof( args.Argv( 3 ) ), atof( args.Argv( 4 ) ) );
+			player->freeCamAnchorSet = true;
+		} else if ( !idStr::Icmp( cmd, "angles" ) && args.Argc() == 5 ) {
+			player->freeCamAngles.pitch = atof( args.Argv( 2 ) );
+			player->freeCamAngles.yaw = atof( args.Argv( 3 ) );
+			player->freeCamAngles.roll = atof( args.Argv( 4 ) );
+			player->freeCamAnchorSet = true;
+		} else if ( !idStr::Icmp( cmd, "speed" ) && args.Argc() == 3 ) {
+			dbg_freeCam_speed.SetFloat( atof( args.Argv( 2 ) ) );
+		} else {
+			gameLocal.Printf( "usage: freeCam 0|1|2 | here | pos <x> <y> <z> | angles <pitch> <yaw> <roll> | speed <u/s>\n" );
+		}
+	}
+
+	gameLocal.Printf( "freeCam mode %d%s%s%s, anchor %s angles %s\n",
+		dbg_freeCam.GetInteger(), player->freeCamAnchorSet ? "" : " (anchor not set yet)",
+		dbg_freeCam_cine.GetInteger() ? ", cinematic wins" : ", debug view wins",
+		dbg_freeCam.GetInteger() >= 2 ? ", flying" : "",
+		player->freeCamOrigin.ToString(), player->freeCamAngles.ToString() );
+}
+/*
+==================
 Cmd_Noclip_f
 
 argv(0) noclip
@@ -2423,6 +2470,7 @@ void idGameLocal::InitConsoleCommands( void ) {
 	cmdSystem->AddCommand( "centerview",			Cmd_CenterView_f,			CMD_FL_GAME,				"centers the view" );
 	cmdSystem->AddCommand( "god",					Cmd_God_f,					CMD_FL_GAME|CMD_FL_CHEAT,	"enables god mode" );
 	cmdSystem->AddCommand( "notarget",				Cmd_Notarget_f,				CMD_FL_GAME|CMD_FL_CHEAT,	"disables the player as a target" );
+	cmdSystem->AddCommand( "freeCam",				Cmd_FreeCam_f,				CMD_FL_GAME|CMD_FL_CHEAT,	"debug free camera: freeze the view / fly it (0|1|2, here, pos, angles, speed)" );
 	cmdSystem->AddCommand( "noclip",				Cmd_Noclip_f,				CMD_FL_GAME|CMD_FL_CHEAT,	"disables collision detection for the player" );
 	cmdSystem->AddCommand( "kill",					Cmd_Kill_f,					CMD_FL_GAME,				"kills the player" );
 	cmdSystem->AddCommand( "where",					Cmd_GetViewpos_f,			CMD_FL_GAME|CMD_FL_CHEAT,	"prints the current view position" );
