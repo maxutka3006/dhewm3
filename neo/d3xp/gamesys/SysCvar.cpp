@@ -332,7 +332,7 @@ idCVar pm_thirdPerson(				"pm_thirdPerson",			"0",			CVAR_GAME | CVAR_NETWORKSYN
 idCVar pm_thirdPersonDeath(			"pm_thirdPersonDeath",		"0",			CVAR_GAME | CVAR_NETWORKSYNC | CVAR_BOOL, "enables third person view when player dies" );
 idCVar pm_modelView(				"pm_modelView",				"0",			CVAR_GAME | CVAR_NETWORKSYNC | CVAR_INTEGER, "draws camera from POV of player model (1 = always, 2 = when dead)", 0, 2, idCmdSystem::ArgCompletion_Integer<0,2> );
 idCVar pm_airTics(					"pm_air",					"1800",			CVAR_GAME | CVAR_NETWORKSYNC | CVAR_INTEGER, "how long in milliseconds the player can go without air before he starts taking damage" );
-idCVar pm_ignoreVacuum(				"pm_ignoreVacuum",			"0",			CVAR_GAME | CVAR_BOOL, "ignores air/vacuum checks, allowing normal movement in open areas with info_vacuum (set newAirless to false)" );
+idCVar pm_ignoreVacuum(				"pm_ignoreVacuum",			"0",			CVAR_GAME | CVAR_BOOL | CVAR_CHEAT, "ignores air/vacuum checks, allowing normal movement in open areas with info_vacuum (set newAirless to false)" );
 
 idCVar g_showPlayerShadow(			"g_showPlayerShadow",		"0",			CVAR_GAME | CVAR_ARCHIVE | CVAR_BOOL, "enables shadow of player model" );
 idCVar g_showHud(					"g_showHud",				"1",			CVAR_GAME | CVAR_ARCHIVE | CVAR_BOOL, "" );
@@ -432,4 +432,4 @@ idCVar dbg_freeCam_cine(			"dbg_freeCam_cine",			"0",			CVAR_GAME | CVAR_INTEGER
 idCVar dbg_freeCam_look(			"dbg_freeCam_look",			"1",			CVAR_GAME | CVAR_INTEGER | CVAR_CHEAT, "1 = mouse look turns the frozen camera (cinematics included), 0 = its angles are pinned as well" );
 idCVar dbg_freeCam_body(			"dbg_freeCam_body",			"1",			CVAR_GAME | CVAR_INTEGER | CVAR_CHEAT, "1 = eye detached from the player: own body is drawn, no first-person weapon (viewID 0)" );
 idCVar dbg_freeCam_speed(			"dbg_freeCam_speed",		"400",			CVAR_GAME | CVAR_FLOAT | CVAR_CHEAT, "fly speed of the frozen camera in units per second" );
-idCVar dbg_freeCam_visible(			"dbg_freeCam_visible",		"1",			CVAR_GAME | CVAR_INTEGER | CVAR_CHEAT, "1 = don't hide the player model when a cinematic starts while the debug camera is on" );
+idCVar dbg_freeCam_visible(			"dbg_freeCam_visible",		"0",			CVAR_GAME | CVAR_INTEGER | CVAR_CHEAT, "1 = don't hide the player model when a cinematic starts while the debug camera is on" );
