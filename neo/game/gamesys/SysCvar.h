@@ -39,6 +39,8 @@ extern idCVar	dbg_freeCam_look;
 extern idCVar	dbg_freeCam_body;
 extern idCVar	dbg_freeCam_speed;
 extern idCVar	dbg_freeCam_visible;
+extern idCVar	dbg_freeCam_freezeAnim;
+
 
 extern idCVar	g_cinematic;
 extern idCVar	g_cinematicMaxSkipTime;

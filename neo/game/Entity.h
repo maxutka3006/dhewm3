@@ -218,6 +218,7 @@ public:
 	// animation
 	virtual bool			UpdateAnimationControllers( void );
 	bool					UpdateRenderEntity( renderEntity_s *renderEntity, const renderView_t *renderView );
+	bool					FreezeAnim( void );	// DEBUG free camera: true while the debug camera holds this entity's animation still
 	static bool				ModelCallback( renderEntity_s *renderEntity, const renderView_t *renderView );
 	virtual idAnimator *	GetAnimator( void );	// returns animator object used by this entity
 

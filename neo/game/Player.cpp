@@ -6376,6 +6376,16 @@ void idPlayer::Think( void ) {
 	}
 	FreeCamFly();
 
+	if ( FreeCamFlying() ) {
+		// DEBUG free camera: the camera reads the raw command by itself (FreeCamFly above),
+		// so while it flies the body gets no input at all - no buttons, no impulse, no moves
+		usercmd.buttons = 0;
+		usercmd.impulse = 0;
+		usercmd.forwardmove = 0;
+		usercmd.rightmove = 0;
+		usercmd.upmove = 0;
+	}
+
 	if ( gameLocal.inCinematic && gameLocal.skipCinematic ) {
 		return;
 	}
@@ -6482,7 +6492,7 @@ void idPlayer::Think( void ) {
 		UpdateScript();
 
 		// service animations
-		if ( !spectating && !af.IsActive() && !gameLocal.inCinematic ) {
+		if ( !spectating && !af.IsActive() && !gameLocal.inCinematic && !FreeCamFlying() ) {
 			UpdateConditions();
 			UpdateAnimState();
 			CheckBlink();
@@ -6504,7 +6514,13 @@ void idPlayer::Think( void ) {
 	if ( spectating ) {
 		UpdateSpectating();
 	} else if ( health > 0 ) {
-		UpdateWeapon();
+		if ( FreeCamFlying() ) {
+			// DEBUG free camera: while it flies the body does not fire or reload, and the weapon
+			// plays neither an animation nor a sound - StopFiring() is the game's own way to drop it
+			StopFiring();
+		} else {
+			UpdateWeapon();
+		}
 	}
 
 	UpdateAir();
@@ -6551,7 +6567,13 @@ void idPlayer::Think( void ) {
 	}
 
 	if ( !g_stopTime.GetBool() ) {
-		UpdateAnimation();
+		if ( FreeCamFlying() ) {
+			// DEBUG free camera: the body's animator is not serviced while the camera flies, so no
+			// frame command of a running animation (footsteps, gear, voice lines) can fire. The pose
+			// freezes on its last frame, and the Present() right after this keeps it on screen
+		} else {
+			UpdateAnimation();
+		}
 
 		Present();
 
@@ -7996,6 +8018,16 @@ void idPlayer::ClientPredictionThink( void ) {
 	buttonMask &= usercmd.buttons;
 	usercmd.buttons &= ~buttonMask;
 
+	if ( FreeCamFlying() ) {
+		// DEBUG free camera: the camera reads the raw command by itself (FreeCamFly above),
+		// so while it flies the body gets no input at all - no buttons, no impulse, no moves
+		usercmd.buttons = 0;
+		usercmd.impulse = 0;
+		usercmd.forwardmove = 0;
+		usercmd.rightmove = 0;
+		usercmd.upmove = 0;
+	}
+
 	if ( objectiveSystemOpen ) {
 		usercmd.forwardmove = 0;
 		usercmd.rightmove = 0;
@@ -8043,7 +8075,7 @@ void idPlayer::ClientPredictionThink( void ) {
 	UpdateFocus();
 
 	// service animations
-	if ( !spectating && !af.IsActive() ) {
+	if ( !spectating && !af.IsActive() && !FreeCamFlying() ) {
 		UpdateConditions();
 		UpdateAnimState();
 		CheckBlink();
@@ -8060,7 +8092,13 @@ void idPlayer::ClientPredictionThink( void ) {
 	CalculateRenderView();
 
 	if ( !gameLocal.inCinematic && weapon.GetEntity() && ( health > 0 ) && !( gameLocal.isMultiplayer && spectating ) ) {
-		UpdateWeapon();
+		if ( FreeCamFlying() ) {
+			// DEBUG free camera: while it flies the body does not fire or reload, and the weapon
+			// plays neither an animation nor a sound - StopFiring() is the game's own way to drop it
+			StopFiring();
+		} else {
+			UpdateWeapon();
+		}
 	}
 
 	UpdateHud();
@@ -8103,7 +8141,13 @@ void idPlayer::ClientPredictionThink( void ) {
 	}
 
 	if ( !gameLocal.inCinematic ) {
-		UpdateAnimation();
+		if ( FreeCamFlying() ) {
+			// DEBUG free camera: the body's animator is not serviced while the camera flies, so no
+			// frame command of a running animation (footsteps, gear, voice lines) can fire. The pose
+			// freezes on its last frame, and the Present() right after this keeps it on screen
+		} else {
+			UpdateAnimation();
+		}
 	}
 
 	if ( gameLocal.isMultiplayer ) {

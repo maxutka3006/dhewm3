@@ -1532,11 +1532,45 @@ int idEntity::GetModelDefHandle( void ) {
 
 /*
 ================
+idEntity::FreezeAnim
+
+DEBUG free camera: with dbg_freeCam_freezeAnim on, the flying camera (dbg_freeCam 2) leaves the
+body of the local player - and everything riding on it, the head and the weapon in its hands - on
+the frame it was frozen at. This is asked from two places on purpose: the renderer callback, which
+is only one of the doors into the animation, and idAnimator::CreateFrame, the funnel every pose
+goes through. Only the funnel closes the paths that used to keep the walking cycle running behind
+the flying camera - attachments and joint lookups (GetJointWorldTransform) and the IK pass.
+================
+*/
+bool idEntity::FreezeAnim( void ) {
+	if ( !dbg_freeCam_freezeAnim.GetBool() ) {
+		return false;
+	}
+
+	idEntity *frozenBody = this;
+	while ( frozenBody->GetBindMaster() != NULL ) {
+		frozenBody = frozenBody->GetBindMaster();
+	}
+
+	idPlayer *debugPlayer = gameLocal.GetLocalPlayer();
+	if ( debugPlayer != NULL && frozenBody == debugPlayer && debugPlayer->FreeCamFlying() ) {
+		return true;
+	}
+
+	return false;
+}
+
+/*
+================
 idEntity::UpdateRenderEntity
 ================
 */
 bool idEntity::UpdateRenderEntity( renderEntity_s *renderEntity, const renderView_t *renderView ) {
 	if ( gameLocal.inCinematic && gameLocal.skipCinematic ) {
+		return false;
+	}
+
+	if ( FreezeAnim() ) {
 		return false;
 	}
 

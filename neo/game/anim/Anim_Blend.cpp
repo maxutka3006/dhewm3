@@ -4193,6 +4193,15 @@ bool idAnimator::CreateFrame( int currentTime, bool force ) {
 		return false;
 	}
 
+	// DEBUG free camera: idAnimator::CreateFrame is the single funnel every pose goes through -
+	// the renderer callback, GetJointTransform / GetJointLocalTransform, the IK pass and AF all
+	// end up here. Building a new frame from the advancing gameLocal.time is exactly what kept
+	// the walking animation going behind the flying camera, so the freeze sits here and not in
+	// the renderer callback alone
+	if ( entity && entity->FreezeAnim() ) {
+		return false;
+	}
+
 	if ( !modelDef || !modelDef->ModelHandle() ) {
 		return false;
 	}
