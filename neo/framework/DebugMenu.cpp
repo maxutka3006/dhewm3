@@ -39,6 +39,7 @@ static idCVar	dm_key( "dbgmenu_key", "F11", CVAR_ARCHIVE | CVAR_SYSTEM | CVAR_NO
 static idCVar	dm_showValues( "dbgmenu_showValues", "1", CVAR_ARCHIVE | CVAR_BOOL | CVAR_SYSTEM | CVAR_NOCHEAT, "show the current CVar values in the debug menu list" );
 static idCVar	dm_bgAlpha( "dbgmenu_bgAlpha", "0.55", CVAR_ARCHIVE | CVAR_FLOAT | CVAR_SYSTEM | CVAR_NOCHEAT,
 					"opacity of the debug menu background (0 = see-through, 1 = solid)", 0.0f, 1.0f );
+static idCVar	dm_tabCompletesFilter( "dbgmenu_tabCompletesFilter", "0", CVAR_ARCHIVE | CVAR_BOOL | CVAR_SYSTEM | CVAR_NOCHEAT, "cmd:/val: TAB completes; filter: 1 = completes (CTRL-TAB lists), 0 = lists" );
 
 // the render system always draws 2D into a 640x480 virtual screen
 static const int	DM_WIDTH			= 640;
@@ -72,6 +73,7 @@ static const int	DM_ROW_DESC2		= DM_ROW_DESC1 + 1;					// 26
 static const int	DM_ROW_STATUS		= DM_ROW_DESC2 + 1;					// 27
 static const int	DM_ROW_HINT1		= DM_ROW_STATUS + 1;				// 28
 static const int	DM_ROW_HINT2		= DM_ROWS - 1;						// 29
+static const int	DM_MATCH_ROWS	= DM_ROW_DESC2 - DM_ROW_LIST;	// matches the panel shows at once
 
 static const idVec4	DM_COLOR_BG( 0.03f, 0.05f, 0.08f, 1.0f );
 static const idVec4	DM_COLOR_BAR( 0.07f, 0.13f, 0.19f, 1.0f );
@@ -83,6 +85,7 @@ static const idVec4	DM_COLOR_SEL( 1.00f, 1.00f, 1.00f, 1.0f );
 static const idVec4	DM_COLOR_EDIT( 1.00f, 0.70f, 0.30f, 1.0f );
 static const idVec4	DM_COLOR_STATUS( 1.00f, 0.85f, 0.35f, 1.0f );
 static const idVec4	DM_COLOR_SEP( 0.20f, 0.45f, 0.60f, 1.0f );
+static const idVec4	DM_COLOR_PANEL( 0.02f, 0.04f, 0.07f, 0.94f );				// under the match list
 
 static const int	DM_NAME_COLS		= DM_COLS / 2;								// width of the name column in the list
 static const int	DM_VALUE_COLS		= DM_COLS - DM_NAME_COLS - 1;
@@ -185,6 +188,104 @@ Used for the alphabetical sorting of the CVar and command lists.
 */
 static int DM_StrListCompare( const idStr *a, const idStr *b ) {
 	return a->Icmp( *b );
+}
+
+/*
+================
+DM_CommonPrefix
+
+The longest beginning all matches share. This is what the console puts into
+the line on the first TAB, so the next typed character narrows the list down.
+================
+*/
+static void DM_CommonPrefix( const idStrList &list, idStr &out ) {
+	int		i, j;
+
+	out.Clear();
+	if ( list.Num() <= 0 ) {
+		return;
+	}
+
+	out = list[0];
+	for ( i = 1; i < list.Num(); i++ ) {
+		const char *a = out.c_str();
+		const char *b = list[i].c_str();
+
+		for ( j = 0; a[j] && b[j]; j++ ) {
+			char	ca = a[j];
+			char	cb = b[j];
+
+			if ( ca >= 'A' && ca <= 'Z' ) {
+				ca = (char)( ca - 'A' + 'a' );
+			}
+			if ( cb >= 'A' && cb <= 'Z' ) {
+				cb = (char)( cb - 'A' + 'a' );
+			}
+			if ( ca != cb ) {
+				break;
+			}
+		}
+		out.CapLength( j );
+	}
+}
+
+/*
+================
+DM_CollectMatch
+
+The callback the command and the CVar system call for every candidate they
+have. Both of them hand back everything they know, and the console keeps only
+what starts with the line that is being completed; this filters in exactly the
+same way, so the menu shows what the console would have printed.
+================
+*/
+static idStrList *	dmMatchSink = NULL;
+static const char *	dmMatchBase = NULL;
+
+static void DM_CollectMatch( const char *s ) {
+	idStr	match;
+	int		i;
+
+	if ( dmMatchSink == NULL || dmMatchBase == NULL || s == NULL || s[0] == '\0' ) {
+		return;
+	}
+	if ( idStr::Icmpn( s, dmMatchBase, (int)strlen( dmMatchBase ) ) != 0 ) {
+		return;
+	}
+
+	match = s;
+	for ( i = 0; i < dmMatchSink->Num(); i++ ) {
+		if ( ( *dmMatchSink )[i].Icmp( match ) == 0 ) {
+			return;				// a name that is both a command and a CVar
+		}
+	}
+	dmMatchSink->Append( match );
+}
+
+/*
+================
+DM_CollectCompletions
+
+Fills out with the names ("arguments" false) or with the arguments of the
+command that is being typed ("arguments" true). Every entry is a complete
+command line - "map game/admin.map" and not just "game/admin.map" - because
+the engine builds it that way, so a match can be run as it stands.
+================
+*/
+static void DM_CollectCompletions( idStrList &out, const char *base, bool arguments ) {
+	dmMatchSink = &out;
+	dmMatchBase = base;
+
+	if ( arguments ) {
+		cmdSystem->ArgCompletion( base, DM_CollectMatch );
+		cvarSystem->ArgCompletion( base, DM_CollectMatch );
+	} else {
+		cmdSystem->CommandCompletion( DM_CollectMatch );
+		cvarSystem->CommandCompletion( DM_CollectMatch );
+	}
+
+	dmMatchSink = NULL;
+	dmMatchBase = NULL;
 }
 
 /*
@@ -476,6 +577,16 @@ private:
 	void					BeginEdit( const char *initialText, const char *target, bool isCommand );
 	void					EndEdit( void );
 	void					CancelEdit( void );
+	void					CompleteEdit( void );
+	void					RunEditLine( void );
+	void					CollectMatches( const char *line );
+	void					SetEditBuffer( const char *text );
+	void					ApplyMatch( void );
+	void					StepMatch( int delta );
+	void					StepMatchPage( int page );
+	void					GotoMatch( int index );
+	void					ClearMatches( void );
+	bool					MatchesActive( void ) const { return completeLive && completeMatches.Num() > 0; }
 
 	void					SetStatus( const char *text );
 
@@ -485,6 +596,7 @@ private:
 	void					DrawRowBar( int row, const idVec4 &color );
 
 	void					DrawList( void );
+	void					DrawMatches( void );
 	void					DrawCvarInfo( const char *name );
 	void					DrawCommandInfo( const char *name );
 	void					DrawActionInfo( int actionIndex );
@@ -504,6 +616,13 @@ private:
 	bool					active;
 	bool					pauseSetByMenu;
 	idStr					status;
+	idStrList				completeMatches;	// candidates the engine offers for the typed line
+	idStr					completeStrip;		// text dropped when a match goes back into the line
+	int						completeIndex;		// match the line holds now, -1 = the common beginning
+	bool					completeLive;		// the line came from the completion, not from typing
+	bool					completeNarrowed;	// the matches share this beginning
+									// and it is already in the line
+
 	const idMaterial *		bigCharShader;
 	const idMaterial *		whiteShader;
 };
@@ -553,6 +672,7 @@ idDebugMenuLocal::Init
 ================
 */
 void idDebugMenuLocal::Init( void ) {
+	ClearMatches();
 	active = false;
 	editing = false;
 	editIsCommand = false;
@@ -674,9 +794,11 @@ idDebugMenuLocal::Close
 ================
 */
 void idDebugMenuLocal::Close( void ) {
+	ClearMatches();
 	active = false;
 	editing = false;
 	editField.Clear();
+	editField.ClearAutoComplete();
 
 	SetGamePause( false );
 }
@@ -710,6 +832,7 @@ idDebugMenuLocal::SetFilter
 ================
 */
 void idDebugMenuLocal::SetFilter( const char *text ) {
+	ClearMatches();
 	filterText = text ? text : "";
 	filterLower = filterText;
 	filterLower.ToLower();
@@ -741,6 +864,289 @@ void idDebugMenuLocal::SyncFilterFromEditField( void ) {
 
 /*
 ================
+idDebugMenuLocal::CollectMatches
+
+Asks cmdSystem and cvarSystem what the engine can offer for the line. Which of
+the two things is completed follows from the line itself: its first word alone
+is a command or CVar name, anything after that is an argument of that command
+(file names, maps, sounds, decls, values), and a CVar value is completed as
+"name value" even though the edit line only holds the value.
+================
+*/
+void idDebugMenuLocal::CollectMatches( const char *line ) {
+	idCmdArgs	args;
+	idStr		base;
+
+	completeMatches.Clear();
+	completeStrip.Clear();
+
+	if ( line == NULL || line[0] == '\0' ) {
+		return;
+	}
+
+	// a CVar value: the engine needs the name of the CVar in front of it
+	if ( editing && !editIsCommand ) {
+		if ( editTarget.Length() <= 0 ) {
+			return;
+		}
+		completeStrip = editTarget;
+		completeStrip += " ";
+		base = completeStrip;
+		base += line;
+		DM_CollectCompletions( completeMatches, base.c_str(), true );
+		return;
+	}
+
+	args.TokenizeString( line, false );
+
+	if ( args.Argc() > 1 ) {
+		// the arguments of the command that is being typed
+		base = args.Argv( 0 );
+		base += " ";
+		base += args.Args();
+		if ( base.Length() > 0 ) {
+			DM_CollectCompletions( completeMatches, base.c_str(), true );
+		}
+		return;
+	}
+
+	// the name itself, what the console offers first
+	base = args.Argv( 0 );
+	if ( base.Length() <= 0 ) {
+		return;
+	}
+	DM_CollectCompletions( completeMatches, base.c_str(), false );
+
+	// a name that is already complete ("map" say) has no name matches left, and
+	// then the console moves on to the arguments of that command
+	if ( completeMatches.Num() == 1 && idStr::Icmp( completeMatches[0].c_str(), base.c_str() ) == 0 ) {
+		completeMatches.Clear();
+		base += " ";
+		DM_CollectCompletions( completeMatches, base.c_str(), true );
+	}
+}
+
+/*
+================
+idDebugMenuLocal::SetEditBuffer
+
+Puts a match into the line. A CVar value is completed as "name value" while
+the line holds the value only, so the name is dropped here again.
+================
+*/
+void idDebugMenuLocal::SetEditBuffer( const char *text ) {
+	idStr	line = text ? text : "";
+
+	if ( completeStrip.Length() > 0 && idStr::Icmpn( line.c_str(), completeStrip.c_str(), completeStrip.Length() ) == 0 ) {
+		idStr	tail( line.c_str() + completeStrip.Length() );
+		line = tail;
+	}
+
+	editField.SetBuffer( line.c_str() );
+	editField.ClearAutoComplete();
+	editField.SetCursor( (int)strlen( editField.GetBuffer() ) );
+
+	if ( !editing ) {
+		SyncFilterFromEditField();
+	}
+}
+
+/*
+================
+idDebugMenuLocal::ClearMatches
+
+Forgets the collected matches: the line is typed or moved again, so every
+candidate gathered for the old one is stale.
+================
+*/
+void idDebugMenuLocal::ClearMatches( void ) {
+	completeMatches.Clear();
+	completeStrip.Clear();
+	completeIndex = -1;
+	completeLive = false;
+	completeNarrowed = false;
+}
+
+/*
+================
+idDebugMenuLocal::CompleteEdit
+
+TAB completion, the very same one the console has: the same cmdSystem and
+cvarSystem calls, the same narrowing down to what all matches share, and the
+same cycling through them on every further TAB. The difference is only where
+the list goes - the console prints it, the menu draws it, because the console
+is not visible while the menu is open. What lands in the line is a complete
+command line, so ENTER runs it as it stands.
+================
+*/
+void idDebugMenuLocal::CompleteEdit( void ) {
+	idStr	shown;
+
+	if ( !completeLive ) {
+		// a fresh TAB collects what the engine offers for the line, the TABs
+		// after it walk through what has been collected
+		CollectMatches( editField.GetBuffer() );
+		completeIndex = -1;
+		completeNarrowed = false;
+		completeLive = ( completeMatches.Num() > 0 );
+		if ( !completeLive ) {
+			SetStatus( "no completion" );
+			return;
+		}
+	}
+
+	if ( completeMatches.Num() == 1 ) {
+		completeIndex = 0;
+		SetEditBuffer( completeMatches[0].c_str() );
+	} else if ( completeIndex < 0 && !completeNarrowed ) {
+		// more than one match: narrow the line down to what all of them share,
+		// exactly like the console does on the first TAB
+		idStr	prefix;
+		DM_CommonPrefix( completeMatches, prefix );
+		SetEditBuffer( prefix.c_str() );
+		completeNarrowed = true;	// the next TAB walks the matches
+		completeIndex = -1;
+	} else {
+		completeIndex = ( completeIndex + 1 ) % completeMatches.Num();
+		SetEditBuffer( completeMatches[completeIndex].c_str() );
+	}
+
+	shown = editField.GetBuffer();
+	if ( shown.Length() > 24 ) {
+		shown.CapLength( 24 );
+	}
+
+	if ( completeMatches.Num() == 1 ) {
+		SetStatus( va( "completed: %s", shown.c_str() ) );
+	} else if ( completeIndex >= 0 ) {
+		SetStatus( va( "match %d/%d: %s", completeIndex + 1, completeMatches.Num(), shown.c_str() ) );
+	} else {
+		SetStatus( va( "completed: %s (%d matches, TAB walks them)", shown.c_str(), completeMatches.Num() ) );
+	}
+}
+
+/*
+================
+idDebugMenuLocal::ApplyMatch
+
+Puts the match the index points at into the line and reports it. Every step
+and every jump ends up here, so they all land the same way.
+================
+*/
+void idDebugMenuLocal::ApplyMatch( void ) {
+	idStr	shown;
+
+	if ( completeIndex < 0 || completeIndex >= completeMatches.Num() ) {
+		return;
+	}
+
+	SetEditBuffer( completeMatches[completeIndex].c_str() );
+
+	shown = editField.GetBuffer();
+	if ( shown.Length() > 24 ) {
+		shown.CapLength( 24 );
+	}
+	SetStatus( va( "match %d/%d: %s", completeIndex + 1, completeMatches.Num(), shown.c_str() ) );
+}
+
+/*
+================
+idDebugMenuLocal::StepMatch
+
+Walks through the collected matches without leaving the line: UP and DOWN do
+it one by one, TAB does the same.
+================
+*/
+void idDebugMenuLocal::StepMatch( int delta ) {
+	if ( completeMatches.Num() <= 1 ) {
+		return;
+	}
+
+	if ( completeIndex < 0 ) {
+		completeIndex = ( delta > 0 ) ? 0 : completeMatches.Num() - 1;
+	} else {
+		// a page can be longer than the list, so take the offset modulo the
+		// number of matches and never leave the range
+		completeIndex += delta % completeMatches.Num();
+		completeIndex %= completeMatches.Num();
+		if ( completeIndex < 0 ) {
+			completeIndex += completeMatches.Num();
+		}
+	}
+
+	ApplyMatch();
+}
+
+/*
+================
+idDebugMenuLocal::StepMatchPage
+================
+*/
+void idDebugMenuLocal::StepMatchPage( int page ) {
+	if ( completeMatches.Num() <= 1 || page == 0 ) {
+		return;
+	}
+
+	// one panel holds DM_MATCH_ROWS matches, so a page steps that many
+	StepMatch( page * DM_MATCH_ROWS );
+}
+
+/*
+================
+idDebugMenuLocal::GotoMatch
+
+HOME and END take the first and the last match of the line, the way they take
+the first and the last entry of the list. The index is clamped instead of
+wrapped, so END on the last match stays where it is.
+================
+*/
+void idDebugMenuLocal::GotoMatch( int index ) {
+	if ( completeMatches.Num() <= 0 ) {
+		return;
+	}
+
+	if ( index < 0 ) {
+		index = 0;
+	}
+	if ( index >= completeMatches.Num() ) {
+		index = completeMatches.Num() - 1;
+	}
+
+	completeIndex = index;
+	ApplyMatch();
+}
+
+/*
+================
+idDebugMenuLocal::RunEditLine
+
+Runs what stands in the filter row as a command line. The completion puts a
+complete command line there ("map game/admin.map"), so ENTER runs it as it
+stands, the way the console does, and the row goes back to filtering.
+================
+*/
+void idDebugMenuLocal::RunEditLine( void ) {
+	idStr	text = editField.GetBuffer();
+
+	if ( text.Length() <= 0 ) {
+		return;
+	}
+
+	cmdSystem->BufferCommandText( CMD_EXEC_APPEND, va( "%s\n", text.c_str() ) );
+	SetStatus( va( "executed: %s", text.c_str() ) );
+
+	// the line has been used: the matches are stale and the filter goes back
+	// to the whole list, the way the console clears its input
+	ClearMatches();
+	if ( !editing ) {
+		editField.SetBuffer( "" );
+		editField.SetCursor( 0 );
+		SyncFilterFromEditField();
+	}
+}
+
+/*
+================
 idDebugMenuLocal::SetList
 ================
 */
@@ -748,6 +1154,7 @@ void idDebugMenuLocal::SetList( int newList ) {
 	if ( newList < 0 || newList >= DM_LIST_NUM || newList == list ) {
 		return;
 	}
+	ClearMatches();
 	list = newList;
 	selection = 0;
 	scroll = 0;
@@ -960,10 +1367,49 @@ void idDebugMenuLocal::KeyDownEvent( int key ) {
 			CancelEdit();
 		} else if ( key == K_ENTER || key == K_KP_ENTER ) {
 			EndEdit();
+		} else if ( key == K_TAB ) {
+			CompleteEdit();
+		} else if ( completeLive && ( key == K_UPARROW || key == K_DOWNARROW
+				|| key == K_PGUP || key == K_PGDN ) ) {
+			// walk through the matches of the line that is being edited;
+			// PGUP and PGDN move a whole panel of them at once
+			if ( key == K_PGUP || key == K_PGDN ) {
+				StepMatchPage( ( key == K_PGDN ) ? 1 : -1 );
+			} else {
+				StepMatch( ( key == K_DOWNARROW ) ? 1 : -1 );
+			}
+		} else if ( completeLive && completeMatches.Num() > 1 && ( key == K_HOME || key == K_END ) ) {
+			// the ends of the collected matches, the way HOME and END take the ends
+			// of the list; with a single match the keys keep moving the cursor
+			GotoMatch( ( key == K_END ) ? completeMatches.Num() - 1 : 0 );
 		} else {
+			ClearMatches();
 			editField.KeyDownEvent( key );
 		}
 		return;
+	}
+
+	// the matches of the line are on screen: UP and DOWN walk them the way
+	// TAB does, PGUP and PGDN walk a whole panel of them, HOME and END jump
+	// to the first and the last of them, instead of scrolling the selection
+	// behind the panel
+	if ( completeLive && completeMatches.Num() > 1
+			&& ( key == K_UPARROW || key == K_DOWNARROW || key == K_PGUP || key == K_PGDN
+				|| key == K_HOME || key == K_END ) ) {
+		if ( key == K_PGUP || key == K_PGDN ) {
+			StepMatchPage( ( key == K_PGDN ) ? 1 : -1 );
+		} else if ( key == K_HOME || key == K_END ) {
+			GotoMatch( ( key == K_END ) ? completeMatches.Num() - 1 : 0 );
+		} else {
+			StepMatch( ( key == K_DOWNARROW ) ? 1 : -1 );
+		}
+		return;
+	}
+
+	// browsing the list takes over from a match list that is still on screen
+	if ( key == K_UPARROW || key == K_DOWNARROW || key == K_PGUP || key == K_PGDN
+			|| key == K_HOME || key == K_END ) {
+		ClearMatches();
 	}
 
 	if ( key == ToggleKeyNum() || key == K_ESCAPE ) {
@@ -997,10 +1443,18 @@ void idDebugMenuLocal::KeyDownEvent( int key ) {
 			break;
 		case K_ENTER:
 		case K_KP_ENTER:
-			ExecuteSelected();
+			if ( completeLive && completeMatches.Num() > 0 ) {
+				RunEditLine();		// the line holds a match, ENTER runs it as it is
+			} else {
+				ExecuteSelected();
+			}
 			break;
 		case K_TAB:
-			if ( idKeyInput::IsDown( K_SHIFT ) ) {
+			// this CVar only decides TAB in the filter row; the cmd:/val: line
+			// is handled above and completes whatever this is set to
+			if ( dm_tabCompletesFilter.GetBool() && !idKeyInput::IsDown( K_CTRL ) ) {
+				CompleteEdit();
+			} else if ( idKeyInput::IsDown( K_SHIFT ) ) {
 				SetList( ( list + DM_LIST_NUM - 1 ) % DM_LIST_NUM );
 			} else {
 				SetList( ( list + 1 ) % DM_LIST_NUM );
@@ -1024,6 +1478,7 @@ idDebugMenuLocal::CharEvent
 ================
 */
 void idDebugMenuLocal::CharEvent( int ch ) {
+	ClearMatches();				// the line is typed again, the matches are stale
 	editField.CharEvent( ch );
 	if ( !editing ) {
 		SyncFilterFromEditField();
@@ -1120,10 +1575,12 @@ idDebugMenuLocal::BeginEdit
 ================
 */
 void idDebugMenuLocal::BeginEdit( const char *initialText, const char *target, bool isCommand ) {
+	ClearMatches();
 	editing = true;
 	editIsCommand = isCommand;
 	editTarget = target ? target : "";
 	editField.SetBuffer( initialText ? initialText : "" );
+	editField.ClearAutoComplete();
 	editField.SetCursor( (int)strlen( editField.GetBuffer() ) );
 	SetStatus( isCommand ? "ENTER runs the command, ESC cancels" : "ENTER applies the value, ESC cancels" );
 }
@@ -1134,8 +1591,10 @@ idDebugMenuLocal::CancelEdit
 ================
 */
 void idDebugMenuLocal::CancelEdit( void ) {
+	ClearMatches();
 	editing = false;
 	editField.SetBuffer( filterText.c_str() );
+	editField.ClearAutoComplete();
 	editField.SetCursor( (int)strlen( editField.GetBuffer() ) );
 	SetStatus( "edit cancelled" );
 }
@@ -1147,6 +1606,8 @@ idDebugMenuLocal::EndEdit
 */
 void idDebugMenuLocal::EndEdit( void ) {
 	idStr text = editField.GetBuffer();
+
+	ClearMatches();
 
 	if ( editIsCommand ) {
 		if ( text.Length() > 0 ) {
@@ -1166,6 +1627,7 @@ void idDebugMenuLocal::EndEdit( void ) {
 	editing = false;
 	editField.SetBuffer( filterText.c_str() );
 	editField.SetCursor( (int)strlen( editField.GetBuffer() ) );
+	editField.ClearAutoComplete();
 }
 
 // ---------------------------------------------------------------------------
@@ -1322,21 +1784,35 @@ void idDebugMenuLocal::Draw( void ) {
 	// the list itself
 	DrawList();
 
-	// details of the selected entry
-	const char *name = SelectedName();
-	if ( !name ) {
-		DrawText( 1, DM_ROW_INFO, "nothing matches the filter", DM_COLOR_DIM );
-	} else if ( list == DM_LIST_CVARS ) {
-		DrawCvarInfo( name );
-	} else if ( list == DM_LIST_COMMANDS ) {
-		DrawCommandInfo( name );
+	if ( MatchesActive() ) {
+		// the matches of the line being completed take the room of the list and
+		// of the details, which is where the console prints its own candidates
+		DrawMatches();
 	} else {
-		DrawActionInfo( SelectedListIndex() );
+		// details of the selected entry
+		const char *name = SelectedName();
+		if ( !name ) {
+			DrawText( 1, DM_ROW_INFO, "nothing matches the filter", DM_COLOR_DIM );
+		} else if ( list == DM_LIST_CVARS ) {
+			DrawCvarInfo( name );
+		} else if ( list == DM_LIST_COMMANDS ) {
+			DrawCommandInfo( name );
+		} else {
+			DrawActionInfo( SelectedListIndex() );
+		}
 	}
 
 	// last action and the key hints
 	DrawText( 1, DM_ROW_STATUS, status.c_str(), DM_COLOR_STATUS );
-	DrawText( 1, DM_ROW_HINT1, "UP/DOWN browse  PGUP/PGDN page  TAB list", DM_COLOR_DIM );
+	if ( MatchesActive() && editing ) {
+		DrawText( 1, DM_ROW_HINT1, "TAB next  UP/DOWN move  PGUP/PGDN page  HOME/END first/last  ENTER runs", DM_COLOR_DIM );
+	} else if ( MatchesActive() ) {
+		DrawText( 1, DM_ROW_HINT1, "filter matches  TAB cycles  PGUP/PGDN page  HOME/END first/last", DM_COLOR_DIM );
+	} else if ( editing ) {
+		DrawText( 1, DM_ROW_HINT1, "TAB completes command and arguments", DM_COLOR_DIM );
+	} else {
+		DrawText( 1, DM_ROW_HINT1, "UP/DOWN browse  PGUP/PGDN page  HOME/END first/last  TAB list", DM_COLOR_DIM );
+	}
 	sprintf( line, "TYPE filter  ENTER run/edit  ESC/%s close", idKeyInput::KeyNumToString( ToggleKeyNum(), true ) );
 	DrawTextClipped( 1, DM_ROW_HINT2, line, DM_COLOR_DIM, DM_COLS - 1 );
 }
@@ -1397,6 +1873,78 @@ void idDebugMenuLocal::DrawList( void ) {
 		line += valuePart;
 
 		DrawTextClipped( 0, DM_ROW_LIST + row, line.c_str(), selected ? DM_COLOR_SEL : DM_COLOR_TEXT, DM_COLS );
+	}
+}
+
+/*
+================
+idDebugMenuLocal::DrawMatches
+
+Draws the candidates the engine offered for the line that is being completed,
+the list the console would have printed. It covers the list and the details,
+their rows are simply the room for it, and the match that is in the line right
+now is highlighted. Every entry can be run as it stands.
+================
+*/
+void idDebugMenuLocal::DrawMatches( void ) {
+	char	buffer[512];
+	char	line[256];
+	int		row, i, num, rows, first, last, start, col;
+	bool	current;
+	idVec4	panelColor;
+
+	if ( !MatchesActive() ) {
+		return;
+	}
+
+	num = completeMatches.Num();
+	first = DM_ROW_LIST;
+	last = DM_ROW_DESC2;				// the panel covers list and details
+	rows = last - first;				// every row below its own header
+
+	// the panel follows dbgmenu_bgAlpha the way the menu background does
+	panelColor = DM_COLOR_PANEL;
+	panelColor[3] = DM_COLOR_PANEL[3] * idMath::ClampFloat( 0.0f, 1.0f, dm_bgAlpha.GetFloat() );
+	DrawRectPixels( 0.0f, (float)( first * DM_CHAR_H ), (float)DM_WIDTH,
+			(float)( ( last - first + 1 ) * DM_CHAR_H ), panelColor );
+	DrawRowBar( first, DM_COLOR_BAR );
+
+	if ( completeIndex >= 0 ) {
+		sprintf( buffer, "MATCHES  %d/%d", completeIndex + 1, num );
+	} else {
+		sprintf( buffer, "MATCHES  %d", num );
+	}
+	DrawText( 1, first, buffer, DM_COLOR_TITLE );
+
+	// the line these matches belong to
+	col = DM_COLS / 2;
+	DM_CopyTruncated( line, sizeof( line ), editField.GetBuffer(), DM_COLS - col - 5 );
+	sprintf( buffer, "for: %s", line );
+	DrawTextClipped( col, first, buffer, DM_COLOR_DIM, DM_COLS - col );
+
+	// the window of matches follows the one the line holds
+	start = 0;
+	if ( num > rows ) {
+		start = ( completeIndex >= 0 ) ? completeIndex - rows / 2 : 0;
+		if ( start < 0 ) {
+			start = 0;
+		}
+		if ( start > num - rows ) {
+			start = num - rows;
+		}
+	}
+
+	for ( row = 0; row < rows; row++ ) {
+		i = start + row;
+		if ( i >= num ) {
+			break;
+		}
+		current = ( i == completeIndex );
+		if ( current ) {
+			DrawRowBar( first + 1 + row, DM_COLOR_SEL_BG );
+		}
+		DrawTextClipped( 1, first + 1 + row, completeMatches[i].c_str(),
+				current ? DM_COLOR_SEL : DM_COLOR_TEXT, DM_COLS - 2 );
 	}
 }
 
