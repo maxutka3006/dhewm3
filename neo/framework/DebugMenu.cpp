@@ -870,7 +870,9 @@ Asks cmdSystem and cvarSystem what the engine can offer for the line. Which of
 the two things is completed follows from the line itself: its first word alone
 is a command or CVar name, anything after that is an argument of that command
 (file names, maps, sounds, decls, values), and a CVar value is completed as
-"name value" even though the edit line only holds the value.
+"name value" even though the edit line only holds the value. A space
+behind the name is the arguments already: the tokenizer drops it, but
+"spawn " lists the entityDefs and not the names that begin with spawn.
 ================
 */
 void idDebugMenuLocal::CollectMatches( const char *line ) {
@@ -899,22 +901,46 @@ void idDebugMenuLocal::CollectMatches( const char *line ) {
 
 	args.TokenizeString( line, false );
 
-	if ( args.Argc() > 1 ) {
-		// the arguments of the command that is being typed
-		base = args.Argv( 0 );
-		base += " ";
-		base += args.Args();
-		if ( base.Length() > 0 ) {
-			DM_CollectCompletions( completeMatches, base.c_str(), true );
-		}
-		return;
-	}
-
-	// the name itself, what the console offers first
 	base = args.Argv( 0 );
 	if ( base.Length() <= 0 ) {
 		return;
 	}
+
+	if ( args.Argc() > 1 ) {
+		// the arguments of the command that is being typed
+		base += " ";
+		base += args.Args();
+		DM_CollectCompletions( completeMatches, base.c_str(), true );
+		return;
+	}
+
+	// a space behind the name is an argument position, however little has
+	// been typed after it: "spawn " lists "spawn <entityDef>" like "spawn n"
+	for ( const char *c = line; *c != '\0'; c++ ) {
+		if ( *c != ' ' && *c != '\t' ) {
+			continue;
+		}
+		while ( *c == ' ' || *c == '\t' ) {
+			c++;
+		}
+		base += " ";
+		if ( *c != '\0' ) {
+			idStr	argPart( c );
+			argPart.StripTrailing( ' ' );
+			base += argPart;
+		}
+		DM_CollectCompletions( completeMatches, base.c_str(), true );
+		if ( completeMatches.Num() > 0 ) {
+			return;
+		}
+
+		// nothing for an empty argument: the names keep the line
+		completeMatches.Clear();
+		base = args.Argv( 0 );
+		break;
+	}
+
+	// the name itself, what the console offers first
 	DM_CollectCompletions( completeMatches, base.c_str(), false );
 
 	// a name that is already complete ("map" say) has no name matches left, and
