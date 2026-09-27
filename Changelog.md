@@ -6,9 +6,31 @@ Note: Numbers starting with a "#" like #330 refer to the bugreport with that num
 
 Fork Changes
 ------------------------------------------------------------------------
-* Added advanced debug menu (using console 'texture/bigchars' font) (toggled via F11 by default) 
-* Implemented free (debug) camera (also works in cinematics): via 'freeCam' command or 'dbg_freeCam' CVar (1: freeze the camera, 2: full flight mode) 
+* Added advanced debug menu (using console 'texture/bigchars' font) (toggled via F11 by default)
+  - lists all CVars, all console commands and a few ready-made actions, with a filter line and
+    console-style tab completion of commands and their arguments
+  - the game is stopped while the menu is open (Single Player only, through `g_stopTime`, like the
+    dhewm3 Settings Menu does), so monsters can't hurt you while you browse
+  - `dbgmenu_key` (default `F11`) key that toggles the menu; `dbgmenu_bgAlpha` (default `0.55`)
+    opacity of its background; `dbgmenu_showValues` (default `1`) show the current values in the
+    list; `dbgmenu_tabCompletesFilter` (default `0`) whether `TAB` completes in the filter line or
+    switches the lists
+  - `UP`/`DOWN` move through the list or the matches of the line, `PGUP`/`PGDN` a page at a time,
+    `HOME`/`END` jump to the first/last entry, `TAB`/`SHIFT-TAB` switch lists, `ENTER` runs a
+    command, edits a CVar or runs an action, `ESC`/`F11` close the menu
+* Implemented free (debug) camera (also works in cinematics): via 'freeCam' command or 'dbg_freeCam' CVar (1: freeze the camera, 2: full flight mode)
+  - `freeCam 0|1|2`, `freeCam here`, `freeCam pos <x> <y> <z>`, `freeCam angles <p> <y> <r>`,
+    `freeCam speed <u/s>`; without arguments it prints mode, position and angles
+  - `dbg_freeCam_cine` (default `0`) whether a running cinematic camera owns the view,
+    `dbg_freeCam_look` (default `1`) whether mouse look turns the frozen camera, `dbg_freeCam_body`
+    (default `1`) whether the eye is detached from the player (own body drawn, no weapon),
+    `dbg_freeCam_speed` (default `400`) fly speed in units per second, `dbg_freeCam_visible`
+    (default `0`) whether the player model stays visible when a cinematic starts
+  - in flight mode (`dbg_freeCam 2`) the player body gets no input at all: it doesn't move, fire or
+    reload, its physics is frozen, and its animation is held on the frame it was at
+    (`dbg_freeCam_freezeAnim`, default `1`; set to `0` to keep it cycling, without sounds)
 * Added CVar 'pm_ignoreVacuum': Ignores the air/vacuum logic by forcing 'newAirless' to false. Additionally, freeCam 2 (flight mode) now also forces this variable to false.
+* See `ForkNewFeatures.md` for the full description of the debug menu and the debug free camera.
 
 
 1.5.5 (2026-06-08)
