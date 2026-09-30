@@ -51,10 +51,22 @@ freeCam here               re-anchor the camera at what you see right now
 freeCam pos <x> <y> <z>    move the camera to those coordinates
 freeCam angles <p> <y> <r> point the camera at those angles
 freeCam speed <u/s>        set dbg_freeCam_speed
+freeCamTeleport [1|2]      put the player body where the debug camera is looking from
 ```
 
 Entered without arguments, `freeCam` prints the current mode, whether the camera is anchored, whether
-it's flying, and the position and angles it's at. The CVars behind it:
+it's flying, and the position and angles it's at.
+
+`freeCamTeleport` puts the player body at the point the debug camera is looking from and gives it the
+camera's angles - fly somewhere, look at a spot you want to reach and type it. The camera stays anchored
+where it was, so the body comes to the camera, not the other way round. It needs the camera to be on and
+anchored, and it refuses while a cinematic camera owns the view (see `dbg_freeCam_cine`); the optional
+`1|2` argument is the freeCam mode the call was meant for and only decides which warning you get. The
+body goes through the game's own teleport path, so it lands on the floor if there is one within 16 units
+under the camera point, and in mode `2` it stays there instead of falling - frozen physics never moves it
+again.
+
+The CVars behind it:
 
 - `dbg_freeCam` `0` = off (the default); `1` = the view is pinned where it is, while the player keeps
   playing as usual; `2` = the view is pinned *and* can be flown with the usual movement keys and the

@@ -29,6 +29,9 @@ Fork Changes
   - in flight mode (`dbg_freeCam 2`) the player body gets no input at all: it doesn't move, fire or
     reload, its physics is frozen, and its animation is held on the frame it was at
     (`dbg_freeCam_freezeAnim`, default `1`; set to `0` to keep it cycling, without sounds)
+  - `freeCamTeleport [1|2]` puts the player body at the point the debug camera is looking from,
+    with the camera's angles; the number is the freeCam mode the call was meant for and only
+    decides which warning is printed
 * Added CVar 'pm_ignoreVacuum': Ignores the air/vacuum logic by forcing 'newAirless' to false. Additionally, freeCam 2 (flight mode) now also forces this variable to false.
 * See `ForkNewFeatures.md` for the full description of the debug menu and the debug free camera.
 

@@ -554,6 +554,60 @@ void Cmd_FreeCam_f( const idCmdArgs &args ) {
 }
 /*
 ==================
+Cmd_FreeCamTeleport_f
+
+argv(0) freeCamTeleport [1|2]
+
+Puts the player body at the point the debug camera is looking from right now and gives it the
+camera's angles, so you can fly somewhere, look at the spot you want to reach, and then be there.
+The camera itself stays anchored where it was: the body comes to it, not the other way round.
+
+The optional argument is the freeCam mode the call was meant for (1 = the pinned view that leaves
+the player playing, 2 = the flying view that freezes the body). It only decides which warning is
+printed: the teleport happens in whichever mode the camera is in, and is refused only when there
+is nothing to take a position from.
+==================
+*/
+void Cmd_FreeCamTeleport_f( const idCmdArgs &args ) {
+	idPlayer	*player;
+	int			mode;
+
+	player = gameLocal.GetLocalPlayer();
+	if ( !player || !gameLocal.CheatsOk() ) {
+		return;
+	}
+
+	mode = dbg_freeCam.GetInteger();
+	if ( mode <= 0 ) {
+		gameLocal.Printf( "freeCamTeleport: dbg_freeCam is 0, there is no debug camera to take a position from\n" );
+		return;
+	}
+	if ( !player->FreeCamActive() ) {
+		gameLocal.Printf( "freeCamTeleport: a cinematic camera owns the view right now, see dbg_freeCam_cine\n" );
+		return;
+	}
+	if ( !player->freeCamAnchorSet ) {
+		gameLocal.Printf( "freeCamTeleport: the debug camera has no anchor yet, it gets one from the next rendered frame\n" );
+		return;
+	}
+
+	if ( args.Argc() >= 2 ) {
+		int want = atoi( args.Argv( 1 ) );
+
+		if ( want != 1 && want != 2 ) {
+			gameLocal.Printf( "freeCamTeleport: argument '%s' is not 1 or 2, ignoring it\n", args.Argv( 1 ) );
+		} else if ( want != mode ) {
+			gameLocal.Printf( "freeCamTeleport: that call was meant for freeCam %d, but the camera is in mode %d - going anyway\n", want, mode );
+		}
+	}
+
+	gameLocal.Printf( "freeCamTeleport: player to %s angles %s (freeCam mode %d)\n",
+		player->freeCamOrigin.ToString(), player->freeCamAngles.ToString(), mode );
+
+	player->Teleport( player->freeCamOrigin, player->freeCamAngles, NULL );
+}
+/*
+==================
 Cmd_Noclip_f
 
 argv(0) noclip
@@ -2471,6 +2525,7 @@ void idGameLocal::InitConsoleCommands( void ) {
 	cmdSystem->AddCommand( "god",					Cmd_God_f,					CMD_FL_GAME|CMD_FL_CHEAT,	"enables god mode" );
 	cmdSystem->AddCommand( "notarget",				Cmd_Notarget_f,				CMD_FL_GAME|CMD_FL_CHEAT,	"disables the player as a target" );
 	cmdSystem->AddCommand( "freeCam",				Cmd_FreeCam_f,				CMD_FL_GAME|CMD_FL_CHEAT,	"debug free camera: freeze the view / fly it (0|1|2, here, pos, angles, speed)" );
+	cmdSystem->AddCommand( "freeCamTeleport",		Cmd_FreeCamTeleport_f,		CMD_FL_GAME|CMD_FL_CHEAT,	"debug free camera: put the player body where the debug camera is looking from (optional 1|2)" );
 	cmdSystem->AddCommand( "noclip",				Cmd_Noclip_f,				CMD_FL_GAME|CMD_FL_CHEAT,	"disables collision detection for the player" );
 	cmdSystem->AddCommand( "kill",					Cmd_Kill_f,					CMD_FL_GAME,				"kills the player" );
 	cmdSystem->AddCommand( "where",					Cmd_GetViewpos_f,			CMD_FL_GAME|CMD_FL_CHEAT,	"prints the current view position" );
