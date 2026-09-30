@@ -41,6 +41,11 @@ static idCVar	dm_bgAlpha( "dbgmenu_bgAlpha", "0.55", CVAR_ARCHIVE | CVAR_FLOAT |
 					"opacity of the debug menu background (0 = see-through, 1 = solid)", 0.0f, 1.0f );
 static idCVar	dm_tabCompletesFilter( "dbgmenu_tabCompletesFilter", "0", CVAR_ARCHIVE | CVAR_BOOL | CVAR_SYSTEM | CVAR_NOCHEAT, "cmd:/val: TAB completes; filter: 1 = completes (CTRL-TAB lists), 0 = lists" );
 
+static idCVar	dm_gamepad( "dbgmenu_gamepad", "0", CVAR_ARCHIVE | CVAR_BOOL | CVAR_SYSTEM | CVAR_NOCHEAT, "let a gamepad drive the debug menu (the on-screen keyboard included)" );
+static idCVar	dm_osk( "dbgmenu_osk", "1", CVAR_ARCHIVE | CVAR_BOOL | CVAR_SYSTEM | CVAR_NOCHEAT, "offer the on-screen keyboard for filter:, cmd: and val:" );
+static idCVar	dm_gamepadCombo( "dbgmenu_gamepadCombo", "JOY_BTN_LSHOULDER+JOY_BTN_RSHOULDER+JOY_BTN_BACK+JOY_BTN_START", CVAR_ARCHIVE | CVAR_SYSTEM | CVAR_NOCHEAT,
+					"gamepad buttons that open the debug menu when held together ('+' separated key names)" );
+
 // the render system always draws 2D into a 640x480 virtual screen
 static const int	DM_WIDTH			= 640;
 static const int	DM_HEIGHT			= 480;
@@ -89,6 +94,41 @@ static const idVec4	DM_COLOR_PANEL( 0.02f, 0.04f, 0.07f, 0.94f );				// under th
 
 static const int	DM_NAME_COLS		= DM_COLS / 2;								// width of the name column in the list
 static const int	DM_VALUE_COLS		= DM_COLS - DM_NAME_COLS - 1;
+
+static const int	DM_COMBO_MAX		= 8;								// buttons the open-combo can hold
+
+// ---------------------------------------------------------------------------
+// on-screen keyboard
+// ---------------------------------------------------------------------------
+
+// The keyboard is drawn in the room the list and the details normally take: a
+// grid of keys at the places QWERTY puts them, so a pad user finds them by
+// feel, and the matches of the line under the keys.
+static const int	DM_OSK_LAYOUTS		= 3;
+static const int	DM_OSK_ROWS			= 4;
+static const int	DM_OSK_COLS			= 10;
+static const int	DM_OSK_LEFT			= 2;								// screen column of the first key
+static const int	DM_OSK_CELL_W		= 3;								// screen columns one key takes
+static const int	DM_OSK_ROW			= DM_ROW_LIST + 2;					// first row of keys
+static const int	DM_OSK_MATCH_ROW	= DM_OSK_ROW + DM_OSK_ROWS + 1;		// matches under the keys
+static const int	DM_OSK_MATCH_ROWS	= DM_ROW_STATUS - DM_OSK_MATCH_ROW - 1;
+
+static const char *dmOskLayoutName[DM_OSK_LAYOUTS] = { "abc", "ABC", "sym" };
+
+static const char *dmOskLayout[DM_OSK_LAYOUTS][DM_OSK_ROWS] = {
+	{ "1234567890",
+	  "qwertyuiop",
+	  "asdfghjkl-",
+	  "zxcvbnm_./" },	// abc
+	{ "!@#$%&*()?",
+	  "QWERTYUIOP",
+	  "ASDFGHJKL+",
+	  "ZXCVBNM,;:" },	// ABC
+	{ "-=[]{}<>|\\",
+	  "\"'`~*/&%:@",
+	  ",.!?()[];#",
+	  "+_=$,.;:!~" }	// sym
+};
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -590,6 +630,24 @@ private:
 
 	void					SetStatus( const char *text );
 
+	// gamepad
+	void					ParseCombo( void );
+	bool					ComboComplete( void ) const;
+	bool					ComboAnyDown( void ) const;
+	bool					JoyComboEvent( const sysEvent_t *event );
+	void					JoyKeyEvent( int key );
+
+	// on-screen keyboard
+	void					OpenOsk( void );
+	void					CloseOsk( void );
+	void					FinishOsk( void );
+	void					OskMove( int dRow, int dCol );
+	void					OskLayoutStep( int delta );
+	void					OskInsert( char ch );
+	void					OskBackspace( void );
+	char					OskChar( void ) const;
+	void					DrawOsk( void );
+
 	void					DrawText( int col, int row, const char *text, const idVec4 &color );
 	void					DrawTextClipped( int col, int row, const char *text, const idVec4 &color, int maxChars );
 	void					DrawRectPixels( float x, float y, float w, float h, const idVec4 &color );
@@ -623,6 +681,19 @@ private:
 	bool					completeNarrowed;	// the matches share this beginning
 									// and it is already in the line
 
+
+	// gamepad: the buttons that open this menu together, and their state
+	int						comboKeys[DM_COMBO_MAX];
+	int						comboNum;
+	bool					comboDown[DM_COMBO_MAX];
+	bool					comboLatched;
+	bool					comboParsed;
+
+	// on-screen keyboard
+	bool					oskActive;
+	int						oskLayout;
+	int						oskRow;
+	int						oskCol;
 	const idMaterial *		bigCharShader;
 	const idMaterial *		whiteShader;
 };
@@ -664,6 +735,19 @@ idDebugMenuLocal::idDebugMenuLocal( void ) {
 	bigCharShader = NULL;
 	whiteShader = NULL;
 	pauseSetByMenu = false;
+
+	comboNum = 0;
+	comboLatched = false;
+	comboParsed = false;
+	for ( int i = 0; i < DM_COMBO_MAX; i++ ) {
+		comboKeys[i] = 0;
+		comboDown[i] = false;
+	}
+
+	oskActive = false;
+	oskLayout = 0;
+	oskRow = 0;
+	oskCol = 0;
 }
 
 /*
@@ -687,6 +771,18 @@ void idDebugMenuLocal::Init( void ) {
 	filtered.Clear();
 	editField.Clear();
 	editField.SetWidthInChars( 40 );
+
+	comboNum = 0;
+	comboLatched = false;
+	comboParsed = false;
+	for ( int i = 0; i < DM_COMBO_MAX; i++ ) {
+		comboDown[i] = false;
+	}
+
+	oskActive = false;
+	oskLayout = 0;
+	oskRow = 0;
+	oskCol = 0;
 
 	pauseSetByMenu = false;
 
@@ -797,6 +893,8 @@ void idDebugMenuLocal::Close( void ) {
 	ClearMatches();
 	active = false;
 	editing = false;
+
+	oskActive = false;
 	editField.Clear();
 	editField.ClearAutoComplete();
 
@@ -816,6 +914,11 @@ void idDebugMenuLocal::Open( const char *initialFilter ) {
 	active = true;
 	editing = false;
 	editIsCommand = false;
+
+	oskActive = false;
+	oskLayout = 0;
+	oskRow = 0;
+	oskCol = 0;
 	selection = 0;
 	scroll = 0;
 	status.Clear();
@@ -1342,6 +1445,319 @@ void idDebugMenuLocal::SetStatus( const char *text ) {
 }
 
 // ---------------------------------------------------------------------------
+// gamepad
+// ---------------------------------------------------------------------------
+
+/*
+================
+idDebugMenuLocal::ParseCombo
+
+Reads dbgmenu_gamepadCombo: key names separated by '+', written the way the key
+binding window writes them. A name the engine does not know is skipped, so a
+typo costs one button instead of the whole combination.
+
+The pad's Start button never reaches the engine as JOY_BTN_START: the SDL event
+code turns it into ESCAPE so that it opens and closes the game menu. The name is
+mapped to that key here, which makes the default combination LB + RB + Back +
+Start what it looks like - a combination of the three shoulder/back buttons and
+the ESCAPE that Start sends.
+================
+*/
+void idDebugMenuLocal::ParseCombo( void ) {
+	const char	*p;
+	char		token[64];
+	int			i, len, key;
+
+	if ( comboParsed && !dm_gamepadCombo.IsModified() ) {
+		return;
+	}
+
+	comboNum = 0;
+	comboLatched = false;
+	for ( i = 0; i < DM_COMBO_MAX; i++ ) {
+		comboDown[i] = false;
+	}
+
+	p = dm_gamepadCombo.GetString();
+	while ( p != NULL && *p != '\0' && comboNum < DM_COMBO_MAX ) {
+		while ( *p == '+' || *p == ' ' || *p == '\t' ) {
+			p++;
+		}
+		if ( *p == '\0' ) {
+			break;
+		}
+
+		len = 0;
+		while ( p[len] != '\0' && p[len] != '+' && p[len] != ' ' && p[len] != '\t' ) {
+			len++;
+		}
+		if ( len > (int)sizeof( token ) - 1 ) {
+			len = sizeof( token ) - 1;
+		}
+		memcpy( token, p, len );
+		token[len] = '\0';
+		p += len;
+
+		key = idKeyInput::StringToKeyNum( token );
+		if ( key <= 0 ) {
+			continue;			// no such key: it takes no part in the combination
+		}
+		if ( key == K_JOY_BTN_START ) {
+			key = K_ESCAPE;		// what the pad's Start really sends
+		}
+		comboKeys[comboNum++] = key;
+	}
+
+	comboParsed = true;
+	dm_gamepadCombo.ClearModified();
+}
+
+/*
+================
+idDebugMenuLocal::ComboComplete
+================
+*/
+bool idDebugMenuLocal::ComboComplete( void ) const {
+	int i;
+
+	for ( i = 0; i < comboNum; i++ ) {
+		if ( !comboDown[i] ) {
+			return false;
+		}
+	}
+	return ( comboNum > 0 );
+}
+
+/*
+================
+idDebugMenuLocal::ComboAnyDown
+================
+*/
+bool idDebugMenuLocal::ComboAnyDown( void ) const {
+	int i;
+
+	for ( i = 0; i < comboNum; i++ ) {
+		if ( comboDown[i] ) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/*
+================
+idDebugMenuLocal::JoyComboEvent
+
+Watches every button of the combination. The three that also do something on
+their own in the menu (LB and RB page, Back opens the keyboard) hold their
+action back until they are released: only then is it clear that no combination
+was being pressed, and a pad user who presses one of them never waits longer
+than the button is held.
+
+ESCAPE is the exception. It is part of the combination because the pad's Start
+sends it, but the same event comes from the ESC key, which has work of its own,
+so it never waits: only the press that completes the combination is taken out
+of the stream, and it is taken out before the game can open its own menu.
+
+Returns true when the event must not reach the game.
+================
+*/
+bool idDebugMenuLocal::JoyComboEvent( const sysEvent_t *event ) {
+	int		i, slot = -1;
+	bool	down;
+
+	if ( event->evType != SE_KEY ) {
+		return false;
+	}
+
+	ParseCombo();
+	if ( comboNum <= 0 ) {
+		return false;
+	}
+
+	for ( i = 0; i < comboNum; i++ ) {
+		if ( comboKeys[i] == event->evValue ) {
+			slot = i;
+			break;
+		}
+	}
+	if ( slot < 0 ) {
+		return false;			// some other key: none of our business
+	}
+
+	down = ( event->evValue2 != 0 );
+	comboDown[slot] = down;
+
+	if ( down ) {
+		if ( ComboComplete() ) {
+			if ( !comboLatched ) {
+				comboLatched = true;
+				Toggle();
+			}
+			return true;		// the combination is being held down
+		}
+		if ( event->evValue == K_ESCAPE ) {
+			return false;		// a plain ESC: the menu and the game keep it
+		}
+		return active;			// wait for the release, this may be a chord
+	}
+
+	// release
+	if ( ComboComplete() ) {
+		return true;			// the rest of the combination is still held
+	}
+	if ( comboLatched ) {
+		if ( !ComboAnyDown() ) {
+			comboLatched = false;
+		}
+		return true;			// the combination already did its work
+	}
+	if ( !ComboAnyDown() ) {
+		comboLatched = false;
+	}
+	if ( active && event->evValue != K_ESCAPE ) {
+		JoyKeyEvent( event->evValue );		// it was a single button after all
+		return true;
+	}
+	return false;
+}
+
+/*
+================
+DM_JoyToMenuKey
+
+The buttons the menu already knows, said with pad buttons: the DPad and the
+left stick move, A runs or edits, B goes back, the shoulders page. Returning 0
+means the button has no such meaning and is handled where it is read.
+================
+*/
+static int DM_JoyToMenuKey( int key ) {
+	switch ( key ) {
+		case K_JOY_DPAD_UP:
+		case K_JOY_STICK1_UP:
+		case K_JOY_STICK2_UP:
+			return K_UPARROW;
+		case K_JOY_DPAD_DOWN:
+		case K_JOY_STICK1_DOWN:
+		case K_JOY_STICK2_DOWN:
+			return K_DOWNARROW;
+		case K_JOY_STICK1_LEFT:
+		case K_JOY_STICK2_LEFT:
+			return K_LEFTARROW;
+		case K_JOY_STICK1_RIGHT:
+		case K_JOY_STICK2_RIGHT:
+			return K_RIGHTARROW;
+		case K_JOY_BTN_SOUTH:
+			return K_ENTER;
+		case K_JOY_BTN_EAST:
+			return K_ESCAPE;
+		case K_JOY_BTN_LSHOULDER:
+			return K_PGUP;
+		case K_JOY_BTN_RSHOULDER:
+			return K_PGDN;
+		default:
+			return 0;
+	}
+}
+
+/*
+================
+idDebugMenuLocal::JoyKeyEvent
+
+What a gamepad button does while the menu is open:
+
+  A runs the entry or the line, B goes back (and closes the menu with it), X
+  completes the line, Y and Back bring the on-screen keyboard up, LB and RB
+  page, the DPad walks the list tabs and the sticks walk the list, the right
+  stick completes, and pressing the left stick types a space while the keyboard
+  is up.
+================
+*/
+void idDebugMenuLocal::JoyKeyEvent( int key ) {
+	int mapped;
+
+	if ( key == ToggleKeyNum() ) {		// a pad button can be the menu key too
+		Close();
+		return;
+	}
+
+	if ( oskActive ) {
+		switch ( key ) {
+			case K_JOY_DPAD_UP:
+			case K_JOY_STICK1_UP:
+				OskMove( -1, 0 );
+				return;
+			case K_JOY_DPAD_DOWN:
+			case K_JOY_STICK1_DOWN:
+				OskMove( 1, 0 );
+				return;
+			case K_JOY_DPAD_LEFT:
+			case K_JOY_STICK1_LEFT:
+				OskMove( 0, -1 );
+				return;
+			case K_JOY_DPAD_RIGHT:
+			case K_JOY_STICK1_RIGHT:
+				OskMove( 0, 1 );
+				return;
+			case K_JOY_BTN_SOUTH:
+				OskInsert( OskChar() );
+				return;
+			case K_JOY_BTN_WEST:
+				OskBackspace();
+				return;
+			case K_JOY_BTN_EAST:
+				CloseOsk();
+				return;
+			case K_JOY_BTN_NORTH:
+				FinishOsk();
+				return;
+			case K_JOY_BTN_LSHOULDER:
+				OskLayoutStep( -1 );
+				return;
+			case K_JOY_BTN_RSHOULDER:
+				OskLayoutStep( 1 );
+				return;
+			case K_JOY_BTN_LSTICK:
+				OskInsert( ' ' );		// the space, right under the thumb
+				return;
+			case K_JOY_BTN_RSTICK:
+				CompleteEdit();
+				return;
+			default:
+				return;
+		}
+	}
+
+	if ( key == K_JOY_BTN_NORTH || key == K_JOY_BTN_BACK ) {
+		OpenOsk();
+		return;
+	}
+
+	// the DPad takes over the list tabs from TAB, which the pad uses to
+	// complete the line
+	if ( !editing && !MatchesActive() ) {
+		if ( key == K_JOY_DPAD_LEFT ) {
+			SetList( ( list + DM_LIST_NUM - 1 ) % DM_LIST_NUM );
+			return;
+		}
+		if ( key == K_JOY_DPAD_RIGHT ) {
+			SetList( ( list + 1 ) % DM_LIST_NUM );
+			return;
+		}
+	}
+
+	if ( key == K_JOY_BTN_WEST || key == K_JOY_BTN_RSTICK ) {
+		CompleteEdit();
+		return;
+	}
+
+	mapped = DM_JoyToMenuKey( key );
+	if ( mapped != 0 ) {
+		KeyDownEvent( mapped );
+	}
+}
+
+// ---------------------------------------------------------------------------
 // input handling
 // ---------------------------------------------------------------------------
 
@@ -1351,11 +1767,21 @@ idDebugMenuLocal::ProcessEvent
 
 Called for every system event before the game sees it. While the menu is open
 it swallows key, character and mouse events so the player does not move around.
+A gamepad drives it the same way a keyboard does: the SDL event code hands its
+buttons over as key events with the K_JOY codes, so nothing new has to be read
+from the platform, and the combination that opens the menu is taken out here
+before the game can see it.
 ================
 */
 bool idDebugMenuLocal::ProcessEvent( const sysEvent_t *event ) {
 	if ( !event ) {
 		return false;
+	}
+
+	// the opening combination comes first: the game must not see its buttons,
+	// and its last button must not open the game menu as ESCAPE
+	if ( dm_gamepad.GetBool() && JoyComboEvent( event ) ) {
+		return true;
 	}
 
 	if ( !active ) {
@@ -1369,7 +1795,11 @@ bool idDebugMenuLocal::ProcessEvent( const sysEvent_t *event ) {
 	switch ( event->evType ) {
 		case SE_KEY:
 			if ( event->evValue2 == 1 && event->evValue ) {
-				KeyDownEvent( event->evValue );
+				if ( dm_gamepad.GetBool() && event->evValue >= K_FIRST_JOY && event->evValue <= K_LAST_JOY ) {
+					JoyKeyEvent( event->evValue );
+				} else {
+					KeyDownEvent( event->evValue );
+				}
 			}
 			return true;
 		case SE_CHAR:
@@ -1388,6 +1818,19 @@ idDebugMenuLocal::KeyDownEvent
 ================
 */
 void idDebugMenuLocal::KeyDownEvent( int key ) {
+
+	if ( oskActive ) {
+		// the keyboard is in front of the line, so ESC puts it away first and
+		// the edit or the menu only goes on the next one; the typing keys and
+		// the physical keyboard keep working as they always did
+		if ( key == K_ESCAPE ) {
+			CloseOsk();
+			return;
+		}
+		if ( key == K_ENTER || key == K_KP_ENTER ) {
+			oskActive = false;		// ENTER finishes the line, so the keyboard goes too
+		}
+	}
 	if ( editing ) {
 		if ( key == K_ESCAPE ) {
 			CancelEdit();
@@ -1657,6 +2100,241 @@ void idDebugMenuLocal::EndEdit( void ) {
 }
 
 // ---------------------------------------------------------------------------
+// on-screen keyboard
+// ---------------------------------------------------------------------------
+
+/*
+================
+idDebugMenuLocal::OpenOsk
+
+Brings the on-screen keyboard up in front of the line that is being typed, or
+in front of the filter row when nothing is edited - the two lines a pad cannot
+type into on its own.
+================
+*/
+void idDebugMenuLocal::OpenOsk( void ) {
+	if ( !dm_osk.GetBool() ) {
+		SetStatus( "the on-screen keyboard is off (dbgmenu_osk 0)" );
+		return;
+	}
+
+	oskActive = true;
+	oskLayout = 0;
+	oskRow = 0;
+	oskCol = 0;
+
+	SetStatus( editing ? "keyboard: A types, X deletes, Y applies, B closes"
+			: "keyboard: A types, Y keeps the filter, B closes" );
+}
+
+/*
+================
+idDebugMenuLocal::CloseOsk
+================
+*/
+void idDebugMenuLocal::CloseOsk( void ) {
+	if ( !oskActive ) {
+		return;
+	}
+
+	oskActive = false;
+	SetStatus( editing ? "keyboard closed, ENTER applies the line" : "keyboard closed" );
+}
+
+/*
+================
+idDebugMenuLocal::FinishOsk
+
+The Y button: the line is done. A command or a value is applied the way ENTER
+applies it, the filter row goes back to filtering.
+================
+*/
+void idDebugMenuLocal::FinishOsk( void ) {
+	oskActive = false;
+
+	if ( editing ) {
+		EndEdit();
+		return;
+	}
+
+	SyncFilterFromEditField();
+	ApplyFilter();
+	SetStatus( va( "filter: %s", filterText.c_str() ) );
+}
+
+/*
+================
+idDebugMenuLocal::OskChar
+================
+*/
+char idDebugMenuLocal::OskChar( void ) const {
+	const char *row;
+
+	if ( oskRow < 0 || oskRow >= DM_OSK_ROWS ) {
+		return 0;
+	}
+
+	row = dmOskLayout[oskLayout][oskRow];
+	if ( oskCol < 0 || oskCol >= (int)strlen( row ) ) {
+		return 0;
+	}
+
+	return row[oskCol];
+}
+
+/*
+================
+idDebugMenuLocal::OskMove
+
+Walks the grid and wraps at its edges, so no key needs a special direction.
+================
+*/
+void idDebugMenuLocal::OskMove( int dRow, int dCol ) {
+	int len;
+
+	if ( dRow != 0 ) {
+		oskRow = ( oskRow + dRow + DM_OSK_ROWS ) % DM_OSK_ROWS;
+	}
+
+	len = (int)strlen( dmOskLayout[oskLayout][oskRow] );
+	if ( len <= 0 ) {
+		oskCol = 0;
+		return;
+	}
+
+	oskCol = ( oskCol + dCol ) % len;
+	if ( oskCol < 0 ) {
+		oskCol += len;
+	}
+}
+
+/*
+================
+idDebugMenuLocal::OskLayoutStep
+================
+*/
+void idDebugMenuLocal::OskLayoutStep( int delta ) {
+	int len;
+
+	oskLayout = ( oskLayout + delta + DM_OSK_LAYOUTS ) % DM_OSK_LAYOUTS;
+
+	// the new layout may have a shorter row
+	len = (int)strlen( dmOskLayout[oskLayout][oskRow] );
+	if ( oskCol >= len ) {
+		oskCol = len - 1;
+	}
+	if ( oskCol < 0 ) {
+		oskCol = 0;
+	}
+
+	SetStatus( va( "keyboard: %s", dmOskLayoutName[oskLayout] ) );
+}
+
+/*
+================
+idDebugMenuLocal::OskInsert
+
+Types a character through the very same path the physical keyboard types
+through, so the caret, the filter and the completion behave identically.
+================
+*/
+void idDebugMenuLocal::OskInsert( char ch ) {
+	if ( !oskActive || ch == 0 ) {
+		return;
+	}
+
+	CharEvent( ch );
+}
+
+/*
+================
+idDebugMenuLocal::OskBackspace
+================
+*/
+void idDebugMenuLocal::OskBackspace( void ) {
+	ClearMatches();
+	editField.KeyDownEvent( K_BACKSPACE );
+
+	if ( !editing ) {
+		SyncFilterFromEditField();
+	}
+}
+
+/*
+================
+idDebugMenuLocal::DrawOsk
+
+Draws the keyboard over the list and the details: the line that is typed on
+top, the four rows of keys below it, and the matches of that line under them,
+so a pad user sees what the console would have printed.
+================
+*/
+void idDebugMenuLocal::DrawOsk( void ) {
+	char	buffer[512];
+	idVec4	panelColor;
+	int		row, key, len, col, start;
+	const char *keys;
+
+	panelColor = DM_COLOR_PANEL;
+	panelColor[3] = DM_COLOR_PANEL[3] * idMath::ClampFloat( 0.0f, 1.0f, dm_bgAlpha.GetFloat() );
+	DrawRectPixels( 0.0f, (float)( DM_ROW_LIST * DM_CHAR_H ), (float)DM_WIDTH,
+			(float)( ( DM_ROW_DESC2 - DM_ROW_LIST + 1 ) * DM_CHAR_H ), panelColor );
+	DrawRowBar( DM_ROW_LIST, DM_COLOR_BAR );
+
+	sprintf( buffer, "KEYBOARD  %s", dmOskLayoutName[oskLayout] );
+	DrawText( 1, DM_ROW_LIST, buffer, DM_COLOR_TITLE );
+
+	// the line itself, caret and all
+	DM_InsertCaret( editField.GetBuffer(), editField.GetCursor(), buffer, sizeof( buffer ) );
+	DrawTextClipped( 1, DM_ROW_LIST + 1, DM_TailOfString( buffer, DM_COLS - 2 ), DM_COLOR_EDIT, DM_COLS - 2 );
+
+	for ( row = 0; row < DM_OSK_ROWS; row++ ) {
+		keys = dmOskLayout[oskLayout][row];
+		len = (int)strlen( keys );
+		for ( key = 0; key < len; key++ ) {
+			col = DM_OSK_LEFT + key * DM_OSK_CELL_W;
+			if ( row == oskRow && key == oskCol ) {
+				DrawRectPixels( (float)( col * DM_CHAR_W ), (float)( ( DM_OSK_ROW + row ) * DM_CHAR_H ),
+						(float)( DM_CHAR_W * 2 ), (float)DM_CHAR_H, DM_COLOR_SEL_BG );
+			}
+			buffer[0] = keys[key];
+			buffer[1] = '\0';
+			DrawText( col, DM_OSK_ROW + row, buffer,
+					( row == oskRow && key == oskCol ) ? DM_COLOR_SEL : DM_COLOR_TEXT );
+		}
+	}
+
+	// what the engine offers for the line typed so far
+	if ( completeMatches.Num() > 0 ) {
+		start = 0;
+		if ( completeMatches.Num() > DM_OSK_MATCH_ROWS ) {
+			start = ( completeIndex >= 0 ) ? completeIndex - DM_OSK_MATCH_ROWS / 2 : 0;
+			if ( start < 0 ) {
+				start = 0;
+			}
+			if ( start > completeMatches.Num() - DM_OSK_MATCH_ROWS ) {
+				start = completeMatches.Num() - DM_OSK_MATCH_ROWS;
+			}
+		}
+
+		sprintf( buffer, "MATCHES  %d   (RStick completes)", completeMatches.Num() );
+		DrawTextClipped( 1, DM_OSK_MATCH_ROW, buffer, DM_COLOR_DIM, DM_COLS - 2 );
+
+		for ( row = 0; row < DM_OSK_MATCH_ROWS; row++ ) {
+			key = start + row;
+			if ( key >= completeMatches.Num() ) {
+				break;
+			}
+			if ( key == completeIndex ) {
+				DrawRowBar( DM_OSK_MATCH_ROW + 1 + row, DM_COLOR_SEL_BG );
+			}
+			DrawTextClipped( 1, DM_OSK_MATCH_ROW + 1 + row, completeMatches[key].c_str(),
+					( key == completeIndex ) ? DM_COLOR_SEL : DM_COLOR_TEXT, DM_COLS - 2 );
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // drawing
 // ---------------------------------------------------------------------------
 
@@ -1777,6 +2455,10 @@ void idDebugMenuLocal::Draw( void ) {
 
 	// title and item count
 	DrawText( 1, DM_ROW_TITLE, "DEBUG MENU", DM_COLOR_TITLE );
+
+	if ( dm_gamepad.GetBool() ) {
+		DrawText( 13, DM_ROW_TITLE, "pad: LSHOULD+RSHOULD+BACK+START opens", DM_COLOR_DIM );
+	}
 	sprintf( buffer, "%d/%d", filtered.Num(), listNames.Num() );
 	DrawText( DM_COLS - 3 - (int)strlen( buffer ), DM_ROW_TITLE, buffer, DM_COLOR_DIM );
 
@@ -1807,30 +2489,36 @@ void idDebugMenuLocal::Draw( void ) {
 		DrawTextClipped( 9, DM_ROW_FILTER, DM_TailOfString( buffer, DM_COLS - 11 ), DM_COLOR_TEXT, DM_COLS - 11 );
 	}
 
-	// the list itself
-	DrawList();
-
-	if ( MatchesActive() ) {
-		// the matches of the line being completed take the room of the list and
-		// of the details, which is where the console prints its own candidates
-		DrawMatches();
+	// the list itself, or the on-screen keyboard in its room
+	if ( oskActive ) {
+		DrawOsk();
 	} else {
-		// details of the selected entry
-		const char *name = SelectedName();
-		if ( !name ) {
-			DrawText( 1, DM_ROW_INFO, "nothing matches the filter", DM_COLOR_DIM );
-		} else if ( list == DM_LIST_CVARS ) {
-			DrawCvarInfo( name );
-		} else if ( list == DM_LIST_COMMANDS ) {
-			DrawCommandInfo( name );
+		DrawList();
+
+		if ( MatchesActive() ) {
+			// the matches of the line being completed take the room of the list and
+			// of the details, which is where the console prints its own candidates
+			DrawMatches();
 		} else {
-			DrawActionInfo( SelectedListIndex() );
+			// details of the selected entry
+			const char *name = SelectedName();
+			if ( !name ) {
+				DrawText( 1, DM_ROW_INFO, "nothing matches the filter", DM_COLOR_DIM );
+			} else if ( list == DM_LIST_CVARS ) {
+				DrawCvarInfo( name );
+			} else if ( list == DM_LIST_COMMANDS ) {
+				DrawCommandInfo( name );
+			} else {
+				DrawActionInfo( SelectedListIndex() );
+			}
 		}
 	}
 
 	// last action and the key hints
 	DrawText( 1, DM_ROW_STATUS, status.c_str(), DM_COLOR_STATUS );
-	if ( MatchesActive() && editing ) {
+	if ( oskActive ) {
+		DrawText( 1, DM_ROW_HINT1, "A types  X deletes  Y applies  B closes  LB/RB switch layout  LStick space", DM_COLOR_DIM );
+	} else if ( MatchesActive() && editing ) {
 		DrawText( 1, DM_ROW_HINT1, "TAB next  UP/DOWN move  PGUP/PGDN page  HOME/END first/last  ENTER runs", DM_COLOR_DIM );
 	} else if ( MatchesActive() ) {
 		DrawText( 1, DM_ROW_HINT1, "filter matches  TAB cycles  PGUP/PGDN page  HOME/END first/last", DM_COLOR_DIM );
@@ -1839,8 +2527,13 @@ void idDebugMenuLocal::Draw( void ) {
 	} else {
 		DrawText( 1, DM_ROW_HINT1, "UP/DOWN browse  PGUP/PGDN page  HOME/END first/last  TAB list", DM_COLOR_DIM );
 	}
-	sprintf( line, "TYPE filter  ENTER run/edit  ESC/%s close", idKeyInput::KeyNumToString( ToggleKeyNum(), true ) );
-	DrawTextClipped( 1, DM_ROW_HINT2, line, DM_COLOR_DIM, DM_COLS - 1 );
+
+	if ( dm_gamepad.GetBool() ) {
+		DrawTextClipped( 1, DM_ROW_HINT2, "PAD  DPad/stick move  A run  X complete  Y/Back keyboard  B back  LB/RB page", DM_COLOR_DIM, DM_COLS - 1 );
+	} else {
+		sprintf( line, "TYPE filter  ENTER run/edit  ESC/%s close", idKeyInput::KeyNumToString( ToggleKeyNum(), true ) );
+		DrawTextClipped( 1, DM_ROW_HINT2, line, DM_COLOR_DIM, DM_COLS - 1 );
+	}
 }
 
 /*

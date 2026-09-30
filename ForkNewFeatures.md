@@ -25,6 +25,15 @@ These CVars configure the menu:
   `0` = always switch the lists (this is the default).  
   The `cmd:`/`val:` edit line always completes on `TAB`, no matter what this CVar is set to.
 
+- `dbgmenu_gamepad` if set to `1`, a gamepad drives the menu, including the
+  on-screen keyboard described below.
+- `dbgmenu_gamepadCombo` the gamepad buttons that open the menu when they are held together, as key
+  names separated by `+`. Defaults to
+  `JOY_BTN_LSHOULDER+JOY_BTN_RSHOULDER+JOY_BTN_BACK+JOY_BTN_START`, that is `LB`+`RB`+`Back`+`Start`.
+- `dbgmenu_osk` if set to `1` (the default), the on-screen keyboard ('Y' on the gamepad opens it) is offered for the `filter:`
+  line and for the `cmd:`/`val:` edit lines.
+
+
 Keys while the menu is open:
 
 - `F11` (or whatever `dbgmenu_key` is set to) or `ESC` close the menu; `ESC` first cancels an open
@@ -38,6 +47,32 @@ Keys while the menu is open:
 - `ENTER` runs the selected command, edits the selected CVar, or runs the selected action. Booleans
   are toggled right away, other CVars get an edit line (`val:`) prefixed with their name. Inside an
   edit line, `ENTER` runs what you typed.
+
+### Gamepad
+
+With a gamepad (`dbgmenu_gamepad 1`) the menu also opens on a combination of pad buttons, so it can
+be reached without a keyboard: hold the buttons named in `dbgmenu_gamepadCombo` down, `LB`+`RB`+`Back`
+by default, and press `Start` as the last one. The button that completes the combination is swallowed,
+so the game menu doesn't open behind the debug menu. The combination is read by key name, and the
+pad's `Start` is special: the SDL event code turns it into `ESC` so that it can open and close the game
+menu, so the default combination is really `LB`+`RB`+`Back`+`ESC` - `JOY_BTN_START` in the CVar is
+mapped to that key. A name the engine doesn't know is skipped, so a typo costs one button and not the
+whole combination, and `ESC` used by itself still goes to the menu and the game as always.
+
+Buttons while the menu is open:
+
+- `A` runs the selected entry, or applies the line; `B` goes back and closes the menu; `X` completes
+  what you typed the way `TAB` does; `Y` and `Back` bring up the on-screen keyboard.
+- the DPad and the left stick walk the list (or the matches of the line), the DPad left/right switch
+  the lists; `LB`/`RB` move a whole page; pressing the right stick completes the line.
+- the on-screen keyboard: `A` types the highlighted key, `X` deletes one character, `Y` applies the
+  line and puts the keyboard away, `B` puts it away and keeps typing in the line, `LB`/`RB` switch
+  the layout (`abc` / `ABC` / `sym`), the DPad and the left stick walk the keys, pressing the left
+  stick types a space, and the right stick completes into the line. The matches of the line are shown
+  under the keys, and the keyboard is drawn where the list and the details normally are.
+- the physical keyboard keeps working while the on-screen keyboard is up; `ESC` puts the keyboard away
+  first (`ENTER` applies the line and puts it away with it).
+
 
 ## Debug Free Camera
 

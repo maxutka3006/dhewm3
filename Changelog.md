@@ -18,6 +18,13 @@ Fork Changes
   - `UP`/`DOWN` move through the list or the matches of the line, `PGUP`/`PGDN` a page at a time,
     `HOME`/`END` jump to the first/last entry, `TAB`/`SHIFT-TAB` switch lists, `ENTER` runs a
     command, edits a CVar or runs an action, `ESC`/`F11` close the menu
+  - gamepad support (`dbgmenu_gamepad`, default `0`): the menu opens on a combination of pad buttons
+    (`dbgmenu_gamepadCombo`, default `JOY_BTN_LSHOULDER+JOY_BTN_RSHOULDER+JOY_BTN_BACK+JOY_BTN_START`,
+    i.e. `LB`+`RB`+`Back`+`Start`), `A` runs or applies, `B` goes back, `X` completes, the DPad and the
+    sticks walk the lists, `LB`/`RB` page; `Y`/`Back` bring up an on-screen keyboard for the `filter:`
+    line and for `cmd:`/`val:` (`dbgmenu_osk`, default `1`), with three layouts and the matches of the
+    line shown under the keys
+
 * Implemented free (debug) camera (also works in cinematics): via 'freeCam' command or 'dbg_freeCam' CVar (1: freeze the camera, 2: full flight mode)
   - `freeCam 0|1|2`, `freeCam here`, `freeCam pos <x> <y> <z>`, `freeCam angles <p> <y> <r>`,
     `freeCam speed <u/s>`; without arguments it prints mode, position and angles
