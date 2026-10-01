@@ -71,11 +71,14 @@ Buttons while the menu is open:
 - `A` runs the selected entry, or applies the line; `B` goes back and closes the menu; `X` completes
   what you typed the way `TAB` does; `Y` and `Back` bring up the on-screen keyboard.
 - the DPad and the left stick walk the list (or the matches of the line), the DPad left/right switch
-  the lists; `LB`/`RB` move a whole page; pressing the right stick completes the line.
+  the lists; `LB`/`RB` move a whole page; pressing the right stick completes the line. The right
+  stick's up and down walk the matches of the line the way `UP`/`DOWN` do - on the list and, with the
+  on-screen keyboard up, over the matches shown under the keys.
 - a direction that is held down keeps moving: the list scrolls like it does with a held arrow key,
   the direction repeating after `dbgmenu_padRepeatDelay` and then every `dbgmenu_padRepeatRate`.
   In the list only up and down repeat - left and right switch the lists - and on the on-screen
-  keyboard all four directions slide the cursor along the keys. `LB`/`RB` repeat as well, unless
+  keyboard all four directions slide the cursor along the keys, while the right stick repeats its
+  up and down over the matches both there and in the list. `LB`/`RB` repeat as well, unless
   they are part of `dbgmenu_gamepadCombo`: a combination button reaches the menu when it is
   released, so there is no hold to repeat.
 - the on-screen keyboard: `A` types the highlighted key, `X` deletes one character, `Y` applies the
@@ -135,6 +138,13 @@ The CVars behind it:
 - `dbg_freeCam_body` if set to `1` (the default), the eye is detached from the player: the player's
   own body is drawn and there's no first-person weapon.
 - `dbg_freeCam_speed` the fly speed in units per second. Defaults to `400`.
+- `dbg_freeCam_pad` if set to `1`, a gamepad flies that camera with its own sticks instead of the
+  keys they are bound to. How far the left stick is tilted is the speed, so half a stick flies at
+  half speed, and the triggers fly it up and down; a bound stick is on or off, so without this any
+  tilt past `joy_deadZone` flies at all of `dbg_freeCam_speed`. Looking is left to the look actions
+  the right stick is bound to, which already scale their turn rate by the tilt (`joy_yawSpeed`,
+  `joy_pitchSpeed`, `joy_powerScale`). Defaults to `1`; it only does anything while the `dbg_freeCam 2`
+  camera is flying and the debug menu is closed. Works in the base game and in `d3xp` alike.
 - `dbg_freeCam_visible` if set to `1`, the player model is not hidden when a cinematic starts while
   the debug camera is on. Defaults to `0` (it is hidden, like cinematics normally do).
 - `dbg_freeCam_freezeAnim` if set to `1` (the default), the player's animation is held on the frame it

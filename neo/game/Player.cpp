@@ -4966,9 +4966,19 @@ void idPlayer::FreeCamFly( void ) {
 	// position: fly along the anchor's own axes (axis[0] forward, axis[1] left, axis[2] up)
 	dir = idVec3( (float)cmd.forwardmove, -(float)cmd.rightmove, (float)cmd.upmove );
 	if ( dir.LengthSqr() > 0.0f ) {
+		// the command is a signed char, so 127 is "all the way": a key press always
+		// fills it out, while a stick that dbg_freeCam_pad flies the camera with says
+		// by its tilt how far it is pushed (idUsercmdGenLocal::FreeCamStickMoves). So
+		// take the speed off the length, before the direction is normalized away - a
+		// mixed command is never faster than a plain one either way
+		float speedScale = dir.Length() / 127.0f;
+		if ( speedScale > 1.0f ) {
+			speedScale = 1.0f;
+		}
+
 		dir.Normalize();
 		axis = freeCamAngles.ToMat3();
-		freeCamOrigin += ( axis[ 0 ] * dir.x + axis[ 1 ] * dir.y + axis[ 2 ] * dir.z ) * ( dbg_freeCam_speed.GetFloat() * idMath::M_MS2SEC * (float)gameLocal.msecPrecise );
+		freeCamOrigin += ( axis[ 0 ] * dir.x + axis[ 1 ] * dir.y + axis[ 2 ] * dir.z ) * ( dbg_freeCam_speed.GetFloat() * speedScale * idMath::M_MS2SEC * (float)gameLocal.msecPrecise );
 	}
 }
 

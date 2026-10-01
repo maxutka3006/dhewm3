@@ -50,7 +50,9 @@ Fork Changes
     sticks walk the lists, `LB`/`RB` page; `Y`/`Back` bring up an on-screen keyboard for the `filter:`
     line and for `cmd:`/`val:` (`dbgmenu_osk`, default `1`), with all three layouts on the screen at once
     and the matches of the line shown under the keys; a direction held on the DPad or a stick repeats
-    (`dbgmenu_padRepeatDelay`, default `400` ms, and `dbgmenu_padRepeatRate`, default `50` ms)
+    (`dbgmenu_padRepeatDelay`, default `400` ms, and `dbgmenu_padRepeatRate`, default `50` ms);
+    the right stick's up and down walk the matches of the line, held down or tapped, on the list
+    and with the on-screen keyboard up alike
 
 * Implemented free (debug) camera (also works in cinematics): via 'freeCam' command or 'dbg_freeCam' CVar (1: freeze the camera, 2: full flight mode)
   - `freeCam 0|1|2`, `freeCam here`, `freeCam pos <x> <y> <z>`, `freeCam angles <p> <y> <r>`,
@@ -66,6 +68,10 @@ Fork Changes
   - `freeCamTeleport [1|2]` puts the player body at the point the debug camera is looking from,
     with the camera's angles; the number is the freeCam mode the call was meant for and only
     decides which warning is printed
+  - `dbg_freeCam_pad` (default `1`) flies the `dbg_freeCam 2` camera with the analog sticks
+    instead of the bound keys: how far the left stick is tilted is the speed (half a stick flies
+    at half of `dbg_freeCam_speed`), and the triggers fly it up and down. A bound stick is on or
+    off, so without this any tilt past the dead zone flies at the full speed
 * Added CVar 'pm_ignoreVacuum': Ignores the air/vacuum logic by forcing 'newAirless' to false. Additionally, freeCam 2 (flight mode) now also forces this variable to false.
 * See `ForkNewFeatures.md` for the full description of the debug menu and the debug free camera.
 

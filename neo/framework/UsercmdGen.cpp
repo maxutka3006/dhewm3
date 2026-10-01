@@ -354,6 +354,7 @@ private:
 	void			CircleToSquare( float & axis_x, float & axis_y ) const;
 	void			HandleJoystickAxis( int keyNum, float unclampedValue, float threshold, bool positive );
 	void			JoystickMove( void );
+	void			FreeCamStickMoves( void );
 	void			JoystickFakeMouse(float axis_x, float axis_y, float deadzone);
 	void			MouseMove( void );
 	void			CmdButtons( void );
@@ -453,6 +454,13 @@ idCVar joy_invertLook( "joy_invertLook", "0", CVAR_ARCHIVE | CVAR_BOOL, "inverts
 // these were a bad idea!
 idCVar joy_dampenLook( "joy_dampenLook", "1", CVAR_BOOL | CVAR_ARCHIVE, "Do not allow full acceleration on look" );
 idCVar joy_deltaPerMSLook( "joy_deltaPerMSLook", "0.003", CVAR_FLOAT | CVAR_ARCHIVE, "Max amount to be added on look per MS" );
+
+// The debug free camera (dbg_freeCam, a CVar of the game module) flies off the very
+// usercmd the player gets, and a stick bound to a move key is on or off: the bind
+// adds the whole move as soon as the tilt passes the dead zone, so that camera
+// always flies at one speed. With this on, the tilt itself is the speed.
+idCVar dbg_freeCam_pad( "dbg_freeCam_pad", "1", CVAR_ARCHIVE | CVAR_BOOL,
+	"1 = the left stick flies the frozen debug camera (dbg_freeCam 2) at how far it is tilted, and the triggers fly it up and down, instead of the bound keys being on or off" );
 
 idCVar in_useGamepad( "in_useGamepad", "1", CVAR_ARCHIVE | CVAR_BOOL, "enables/disables the gamepad for PC use" );
 
@@ -968,6 +976,75 @@ void idUsercmdGenLocal::JoystickMove() {
 
 	HandleJoystickAxis( K_JOY_TRIGGER1, joystickAxis[ AXIS_LEFT_TRIG ], triggerThreshold, true );
 	HandleJoystickAxis( K_JOY_TRIGGER2, joystickAxis[ AXIS_RIGHT_TRIG ], triggerThreshold, true );
+
+	// and last, so that it can replace what the binds wrote: a bound stick asks
+	// for the whole move, the tilt says how much of it the debug camera gets
+	FreeCamStickMoves();
+}
+
+/*
+=================
+idUsercmdGenLocal::FreeCamStickMoves
+
+The frozen debug camera (dbg_freeCam 2) flies off the very usercmd the player
+gets, and a stick bound to a move key is on or off: as soon as the tilt passes
+the dead zone the bind adds the whole move, so the camera flies at one speed
+whatever the stick says. With dbg_freeCam_pad the tilt itself becomes that
+move, written once per frame, so half a stick flies at half speed.
+
+Only the movement needs this - the look actions already scale the turn rate by
+the axis value. The values go into cmd.forwardmove/rightmove/upmove, which the
+game reads for the camera and zeroes for the body while it flies, so none of
+this reaches the player. A stick inside its dead zone is left alone, so the
+binds keep whatever command they set.
+=================
+*/
+void idUsercmdGenLocal::FreeCamStickMoves( void ) {
+	idCVar	*freeCam = cvarSystem->Find( "dbg_freeCam" );
+	idCVar	*pad = cvarSystem->Find( "dbg_freeCam_pad" );
+	float	trigUp, trigDown, threshold, axis_x, axis_y, up;
+
+	// the game module owns dbg_freeCam, so it is missing until a map is loaded
+	if ( freeCam == NULL || pad == NULL || pad->GetInteger() == 0 || freeCam->GetInteger() < 2 ) {
+		return;
+	}
+
+	threshold = joy_deadZone.GetFloat();
+
+	axis_x = joystickAxis[ AXIS_LEFT_X ];
+	axis_y = joystickAxis[ AXIS_LEFT_Y ];
+	CircleToSquare( axis_x, axis_y );
+
+	// up on the stick is negative, and the camera flies along
+	// (forwardmove, -rightmove, upmove): the tilt is the length of that move
+	if ( idMath::Fabs( axis_y ) > threshold ) {
+		cmd.forwardmove = idMath::ClampChar( idMath::Ftoi( -axis_y * KEY_MOVESPEED ) );
+	}
+	if ( idMath::Fabs( axis_x ) > threshold ) {
+		cmd.rightmove = idMath::ClampChar( idMath::Ftoi( axis_x * KEY_MOVESPEED ) );
+	}
+
+	// the triggers are the only axes left for the vertical, and a stick cannot
+	// say it: the right one goes up, the left one down. A pad that rests them at
+	// -1 instead of 0 would fly on its own, so anything below zero counts as "not
+	// pressed" - the engine reads them the same way (joy_triggerThreshold)
+	trigUp = joystickAxis[ AXIS_RIGHT_TRIG ];
+	trigDown = joystickAxis[ AXIS_LEFT_TRIG ];
+	if ( trigUp < 0.0f ) {
+		trigUp = 0.0f;
+	}
+	if ( trigDown < 0.0f ) {
+		trigDown = 0.0f;
+	}
+	up = trigUp - trigDown;
+	if ( up > 1.0f ) {
+		up = 1.0f;
+	} else if ( up < -1.0f ) {
+		up = -1.0f;
+	}
+	if ( idMath::Fabs( up ) > threshold ) {
+		cmd.upmove = idMath::ClampChar( idMath::Ftoi( up * KEY_MOVESPEED ) );
+	}
 }
 
 /*

@@ -1688,7 +1688,9 @@ What a gamepad button does while the menu is open:
   completes the line, Y and Back bring the on-screen keyboard up, LB and RB
   page, the DPad walks the list tabs and the sticks walk the list, the right
   stick completes, and pressing the left stick types a space while the keyboard
-  is up.
+  is up. The right stick's up and down walk the matches of the line, both in
+  the list and with the keyboard up, where they hold the match list instead of
+  the keys the left stick moves over.
 ================
 */
 void idDebugMenuLocal::JoyKeyEvent( int key ) {
@@ -1716,6 +1718,15 @@ void idDebugMenuLocal::JoyKeyEvent( int key ) {
 			case K_JOY_DPAD_RIGHT:
 			case K_JOY_STICK1_RIGHT:
 				OskMove( 0, 1 );
+				return;
+			case K_JOY_STICK2_UP:
+			case K_JOY_STICK2_DOWN:
+				// the right stick walks the matches under the keys - the same
+				// rows UP and DOWN walk while the keyboard is away, so a long
+				// match list can be read without leaving the keyboard
+				if ( completeLive && completeMatches.Num() > 1 ) {
+					StepMatch( ( key == K_JOY_STICK2_DOWN ) ? 1 : -1 );
+				}
 				return;
 			case K_JOY_BTN_SOUTH:
 				OskInsert( OskChar() );
@@ -1764,6 +1775,15 @@ void idDebugMenuLocal::JoyKeyEvent( int key ) {
 		}
 	}
 
+	// the right stick walks the matches while they are on screen, one row at
+	// a time, instead of going through the arrow keys the DPad and the left
+	// stick use - the pad's answer to UP and DOWN over the match list
+	if ( ( key == K_JOY_STICK2_UP || key == K_JOY_STICK2_DOWN )
+			&& completeLive && completeMatches.Num() > 1 ) {
+		StepMatch( ( key == K_JOY_STICK2_DOWN ) ? 1 : -1 );
+		return;
+	}
+
 	if ( key == K_JOY_BTN_WEST || key == K_JOY_BTN_RSTICK ) {
 		CompleteEdit();
 		return;
@@ -1785,7 +1805,9 @@ scrolls it the way a held arrow key does, and the shoulders page the same way.
 The keyboard needs none of this - there the platform sends the repeats itself.
 Left and right repeat only while the on-screen keyboard is up, where they
 slide the cursor along the keys; in the list they switch tabs, and a tab
-nobody wants switched twenty times a second.
+nobody wants switched twenty times a second. The right stick repeats up and
+down as well, on the list and on the keyboard alike: both walk the matches
+of the line while the match panel is up.
 ================
 */
 bool idDebugMenuLocal::PadKeyRepeats( int key ) const {
@@ -1799,6 +1821,8 @@ bool idDebugMenuLocal::PadKeyRepeats( int key ) const {
 			case K_JOY_STICK1_DOWN:
 			case K_JOY_STICK1_LEFT:
 			case K_JOY_STICK1_RIGHT:
+			case K_JOY_STICK2_UP:
+			case K_JOY_STICK2_DOWN:
 				return true;
 			default:
 				return false;
