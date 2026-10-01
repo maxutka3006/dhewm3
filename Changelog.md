@@ -6,6 +6,32 @@ Note: Numbers starting with a "#" like #330 refer to the bugreport with that num
 
 Fork Changes
 ------------------------------------------------------------------------
+* Debug menu, after the first round of gamepad testing
+  - the pad is cut out of the game while the menu is open: `idUsercmdGenLocal::JoystickMove()` returns
+    early as long as `debugMenu->Active()`, and `idUsercmdGenLocal::Joystick()` still takes the polled
+    joystick events off the buffer - unread they would pile up and all be applied at once when the
+    menu closes - but applies none of them, so the pad only drives the menu and never moves or turns
+    the player; the menu's own `K_JOY_STICK_*` events come from the event queue, so they keep working
+  - fixed: while the menu is open the cursor of an in-game GUI (the PDA, an interactive GUI) no longer
+    moves with both sticks. That cursor is moved by the `SE_JOYSTICK` events
+    `idUserInterfaceLocal::HandleEvent()` reads, which the menu did not swallow; it does now
+  - a direction held on the DPad or on a stick repeats, so the list scrolls the way it does with a
+    held arrow key: up/down repeat after `dbgmenu_padRepeatDelay` and then every
+    `dbgmenu_padRepeatRate`, and on the on-screen keyboard all four directions slide the cursor
+    along the keys. Left and right do not repeat in the list (they switch it), and `LB`/`RB` only
+    when they are not part of `dbgmenu_gamepadCombo` - a combo button reaches the menu on release,
+    so it has no hold to repeat. The repeat runs off the frame, because a stick that nothing moves
+    sends no event at all while it is held
+  - fixed: `X` on the on-screen keyboard deletes a character again. `idEditField` deletes in
+    `CharEvent()`; `KeyDownEvent()` has no `K_BACKSPACE` branch, which is why the pad's X did nothing
+    while the real `Backspace` worked
+  - the on-screen keyboard draws all three layouts (`abc`, `ABC`, `sym`) at once, as three blocks of
+    keys side by side with the block name under each and the block the cursor is in standing out;
+    `LB`/`RB` jump to the next block instead of switching the layout, so no character hides behind a
+    layout switch any more
+  - a CVar, command or action description gets three lines instead of one: the list is one row shorter,
+    and a CVar's `flags:` and range moved up to the value line
+  - the on-screen keyboard hints follow the new `LB`/`RB` behaviour
 * Added advanced debug menu (using console 'texture/bigchars' font) (toggled via F11 by default)
   - lists all CVars, all console commands and a few ready-made actions, with a filter line and
     console-style tab completion of commands and their arguments
@@ -22,8 +48,9 @@ Fork Changes
     (`dbgmenu_gamepadCombo`, default `JOY_BTN_LSHOULDER+JOY_BTN_RSHOULDER+JOY_BTN_BACK+JOY_BTN_START`,
     i.e. `LB`+`RB`+`Back`+`Start`), `A` runs or applies, `B` goes back, `X` completes, the DPad and the
     sticks walk the lists, `LB`/`RB` page; `Y`/`Back` bring up an on-screen keyboard for the `filter:`
-    line and for `cmd:`/`val:` (`dbgmenu_osk`, default `1`), with three layouts and the matches of the
-    line shown under the keys
+    line and for `cmd:`/`val:` (`dbgmenu_osk`, default `1`), with all three layouts on the screen at once
+    and the matches of the line shown under the keys; a direction held on the DPad or a stick repeats
+    (`dbgmenu_padRepeatDelay`, default `400` ms, and `dbgmenu_padRepeatRate`, default `50` ms)
 
 * Implemented free (debug) camera (also works in cinematics): via 'freeCam' command or 'dbg_freeCam' CVar (1: freeze the camera, 2: full flight mode)
   - `freeCam 0|1|2`, `freeCam here`, `freeCam pos <x> <y> <z>`, `freeCam angles <p> <y> <r>`,

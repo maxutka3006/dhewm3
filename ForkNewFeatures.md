@@ -30,6 +30,10 @@ These CVars configure the menu:
 - `dbgmenu_gamepadCombo` the gamepad buttons that open the menu when they are held together, as key
   names separated by `+`. Defaults to
   `JOY_BTN_LSHOULDER+JOY_BTN_RSHOULDER+JOY_BTN_BACK+JOY_BTN_START`, that is `LB`+`RB`+`Back`+`Start`.
+- `dbgmenu_padRepeatDelay` how long a direction on the DPad or on a stick has to be held down
+  before the menu starts repeating it, in milliseconds. Defaults to `400`; `0` turns the repeat off.
+- `dbgmenu_padRepeatRate` how many milliseconds pass between those repeats once they have
+  started. Defaults to `50`, which walks a page of the list in about a second.
 - `dbgmenu_osk` if set to `1` (the default), the on-screen keyboard ('Y' on the gamepad opens it) is offered for the `filter:`
   line and for the `cmd:`/`val:` edit lines.
 
@@ -39,7 +43,7 @@ Keys while the menu is open:
 - `F11` (or whatever `dbgmenu_key` is set to) or `ESC` close the menu; `ESC` first cancels an open
   edit line.
 - `UP`/`DOWN` move through the list, or through the matches of the line while the match panel is up.
-- `PGUP`/`PGDN` move a whole page (`20` entries) in the list, or a whole panel of matches.
+- `PGUP`/`PGDN` move a whole page (`19` entries) in the list, or a whole panel of matches.
 - `HOME`/`END` jump to the first/last entry.
 - `TAB` switches to the next list (`CVARS` -> `COMMANDS` -> `ACTIONS`), `SHIFT-TAB` to the previous
   one; with `dbgmenu_tabCompletesFilter 1` it completes in the filter line instead, and `CTRL-TAB`
@@ -58,6 +62,9 @@ pad's `Start` is special: the SDL event code turns it into `ESC` so that it can 
 menu, so the default combination is really `LB`+`RB`+`Back`+`ESC` - `JOY_BTN_START` in the CVar is
 mapped to that key. A name the engine doesn't know is skipped, so a typo costs one button and not the
 whole combination, and `ESC` used by itself still goes to the menu and the game as always.
+While the menu is open the pad belongs to it: its buttons and axes no longer reach the player, and
+the axis values the engine sends for the cursor of an in-game GUI (the PDA, another interactive
+GUI) stop here too, so neither the player nor that cursor moves while you walk the lists.
 
 Buttons while the menu is open:
 
@@ -65,14 +72,28 @@ Buttons while the menu is open:
   what you typed the way `TAB` does; `Y` and `Back` bring up the on-screen keyboard.
 - the DPad and the left stick walk the list (or the matches of the line), the DPad left/right switch
   the lists; `LB`/`RB` move a whole page; pressing the right stick completes the line.
+- a direction that is held down keeps moving: the list scrolls like it does with a held arrow key,
+  the direction repeating after `dbgmenu_padRepeatDelay` and then every `dbgmenu_padRepeatRate`.
+  In the list only up and down repeat - left and right switch the lists - and on the on-screen
+  keyboard all four directions slide the cursor along the keys. `LB`/`RB` repeat as well, unless
+  they are part of `dbgmenu_gamepadCombo`: a combination button reaches the menu when it is
+  released, so there is no hold to repeat.
 - the on-screen keyboard: `A` types the highlighted key, `X` deletes one character, `Y` applies the
-  line and puts the keyboard away, `B` puts it away and keeps typing in the line, `LB`/`RB` switch
-  the layout (`abc` / `ABC` / `sym`), the DPad and the left stick walk the keys, pressing the left
+  line and puts the keyboard away, `B` puts it away and keeps typing in the line, `LB`/`RB` jump to the next block, and all three of them (`abc` / `ABC` / `sym`) are on the
+  screen at once, the DPad and the left stick walk the keys, pressing the left
   stick types a space, and the right stick completes into the line. The matches of the line are shown
   under the keys, and the keyboard is drawn where the list and the details normally are.
 - the physical keyboard keeps working while the on-screen keyboard is up; `ESC` puts the keyboard away
   first (`ENTER` applies the line and puts it away with it).
 
+
+### Details panel
+
+Under the list, the selected entry shows its name and type, its current value and up to
+**three** lines of its description, so a long description is not cut off after one line any more.
+For a CVar the `flags:` and the possible range sit on the value line, which is what frees the third
+line; for a command or an action the `ENTER` hint moves into the first description line the text
+did not need.
 
 ## Debug Free Camera
 

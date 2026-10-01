@@ -45,6 +45,10 @@ static idCVar	dm_gamepad( "dbgmenu_gamepad", "0", CVAR_ARCHIVE | CVAR_BOOL | CVA
 static idCVar	dm_osk( "dbgmenu_osk", "1", CVAR_ARCHIVE | CVAR_BOOL | CVAR_SYSTEM | CVAR_NOCHEAT, "offer the on-screen keyboard for filter:, cmd: and val:" );
 static idCVar	dm_gamepadCombo( "dbgmenu_gamepadCombo", "JOY_BTN_LSHOULDER+JOY_BTN_RSHOULDER+JOY_BTN_BACK+JOY_BTN_START", CVAR_ARCHIVE | CVAR_SYSTEM | CVAR_NOCHEAT,
 					"gamepad buttons that open the debug menu when held together ('+' separated key names)" );
+static idCVar	dm_padRepeatDelay( "dbgmenu_padRepeatDelay", "400", CVAR_ARCHIVE | CVAR_INTEGER | CVAR_SYSTEM | CVAR_NOCHEAT,
+					"gamepad: milliseconds a direction has to be held before the debug menu repeats it (0 turns the repeat off)", 0, 2000 );
+static idCVar	dm_padRepeatRate( "dbgmenu_padRepeatRate", "50", CVAR_ARCHIVE | CVAR_INTEGER | CVAR_SYSTEM | CVAR_NOCHEAT,
+					"gamepad: milliseconds between the repeats of a held direction", 10, 1000 );
 
 // the render system always draws 2D into a 640x480 virtual screen
 static const int	DM_WIDTH			= 640;
@@ -70,15 +74,16 @@ static const int	DM_ROW_TITLE		= 0;
 static const int	DM_ROW_TABS			= 1;
 static const int	DM_ROW_FILTER		= 2;
 static const int	DM_ROW_LIST			= 3;
-static const int	DM_LIST_ROWS		= 20;								// rows 3 .. 22
-static const int	DM_ROW_INFO			= DM_ROW_LIST + DM_LIST_ROWS;		// 23
-static const int	DM_ROW_VALUE		= DM_ROW_INFO + 1;					// 24
-static const int	DM_ROW_DESC1		= DM_ROW_VALUE + 1;					// 25
-static const int	DM_ROW_DESC2		= DM_ROW_DESC1 + 1;					// 26
-static const int	DM_ROW_STATUS		= DM_ROW_DESC2 + 1;					// 27
+static const int	DM_LIST_ROWS		= 19;								// rows 3 .. 21
+static const int	DM_ROW_INFO			= DM_ROW_LIST + DM_LIST_ROWS;		// 22
+static const int	DM_ROW_VALUE		= DM_ROW_INFO + 1;					// 23
+static const int	DM_ROW_DESC1		= DM_ROW_VALUE + 1;				// 24
+static const int	DM_ROW_DESC2		= DM_ROW_DESC1 + 1;				// 25
+static const int	DM_ROW_DESC3		= DM_ROW_DESC2 + 1;				// 26
+static const int	DM_ROW_STATUS		= DM_ROW_DESC3 + 1;				// 27
 static const int	DM_ROW_HINT1		= DM_ROW_STATUS + 1;				// 28
 static const int	DM_ROW_HINT2		= DM_ROWS - 1;						// 29
-static const int	DM_MATCH_ROWS	= DM_ROW_DESC2 - DM_ROW_LIST;	// matches the panel shows at once
+static const int	DM_MATCH_ROWS	= DM_ROW_DESC3 - DM_ROW_LIST;	// matches the panel shows at once
 
 static const idVec4	DM_COLOR_BG( 0.03f, 0.05f, 0.08f, 1.0f );
 static const idVec4	DM_COLOR_BAR( 0.07f, 0.13f, 0.19f, 1.0f );
@@ -104,31 +109,35 @@ static const int	DM_COMBO_MAX		= 8;								// buttons the open-combo can hold
 // The keyboard is drawn in the room the list and the details normally take: a
 // grid of keys at the places QWERTY puts them, so a pad user finds them by
 // feel, and the matches of the line under the keys.
-static const int	DM_OSK_LAYOUTS		= 3;
+static const int	DM_OSK_BLOCKS		= 3;								// abc, ABC and sym, all at once
 static const int	DM_OSK_ROWS			= 4;
-static const int	DM_OSK_COLS			= 10;
+static const int	DM_OSK_COLS			= 10;								// keys in one row of a block
+static const int	DM_OSK_KEYS			= DM_OSK_BLOCKS * DM_OSK_COLS;		// keys in one row of the table
 static const int	DM_OSK_LEFT			= 2;								// screen column of the first key
-static const int	DM_OSK_CELL_W		= 3;								// screen columns one key takes
+static const int	DM_OSK_CELL_W		= 2;								// screen columns one key takes
+static const int	DM_OSK_BLOCK_GAP	= 4;								// screen columns between two blocks
 static const int	DM_OSK_ROW			= DM_ROW_LIST + 2;					// first row of keys
-static const int	DM_OSK_MATCH_ROW	= DM_OSK_ROW + DM_OSK_ROWS + 1;		// matches under the keys
+static const int	DM_OSK_LABEL_ROW	= DM_OSK_ROW + DM_OSK_ROWS;			// the block names, under the keys
+static const int	DM_OSK_MATCH_ROW	= DM_OSK_LABEL_ROW + 1;				// matches under the keys
 static const int	DM_OSK_MATCH_ROWS	= DM_ROW_STATUS - DM_OSK_MATCH_ROW - 1;
 
-static const char *dmOskLayoutName[DM_OSK_LAYOUTS] = { "abc", "ABC", "sym" };
+// Every row of the table holds all three blocks side by side: the first ten keys
+// are abc, the next ten ABC and the last ten sym, so every character the pad can
+// type is on the screen at once and none of them hides behind a layout switch.
+static const char *dmOskBlockName[DM_OSK_BLOCKS] = { "abc", "ABC", "sym" };
 
-static const char *dmOskLayout[DM_OSK_LAYOUTS][DM_OSK_ROWS] = {
-	{ "1234567890",
-	  "qwertyuiop",
-	  "asdfghjkl-",
-	  "zxcvbnm_./" },	// abc
-	{ "!@#$%&*()?",
-	  "QWERTYUIOP",
-	  "ASDFGHJKL+",
-	  "ZXCVBNM,;:" },	// ABC
-	{ "-=[]{}<>|\\",
-	  "\"'`~*/&%:@",
-	  ",.!?()[];#",
-	  "+_=$,.;:!~" }	// sym
+static const char *dmOskKeys[DM_OSK_ROWS] = {
+	"1234567890!@#$%&*()?-=[]{}<>|\\",
+	"qwertyuiopQWERTYUIOP\"'`~*/&%:@",
+	"asdfghjkl-ASDFGHJKL+,.!?()[];#",
+	"zxcvbnm_./ZXCVBNM,;:+_=$,.;:!~"
 };
+
+// the screen column of key <key> of a row, the block gaps included
+static int DM_OskKeyCol( int key ) {
+	return DM_OSK_LEFT + ( key / DM_OSK_COLS ) * ( DM_OSK_COLS * DM_OSK_CELL_W + DM_OSK_BLOCK_GAP )
+			+ ( key % DM_OSK_COLS ) * DM_OSK_CELL_W;
+}
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -636,6 +645,10 @@ private:
 	bool					ComboAnyDown( void ) const;
 	bool					JoyComboEvent( const sysEvent_t *event );
 	void					JoyKeyEvent( int key );
+	bool					PadKeyRepeats( int key ) const;
+	void					PadRepeatPress( int key );
+	void					PadRepeatRelease( int key );
+	void					PadRepeatUpdate( void );
 
 	// on-screen keyboard
 	void					OpenOsk( void );
@@ -689,9 +702,12 @@ private:
 	bool					comboLatched;
 	bool					comboParsed;
 
+	// gamepad: the direction that is held down right now, and when it repeats
+	int						padRepeatKey;
+	unsigned int			padRepeatNext;
+
 	// on-screen keyboard
 	bool					oskActive;
-	int						oskLayout;
 	int						oskRow;
 	int						oskCol;
 	const idMaterial *		bigCharShader;
@@ -739,13 +755,14 @@ idDebugMenuLocal::idDebugMenuLocal( void ) {
 	comboNum = 0;
 	comboLatched = false;
 	comboParsed = false;
+	padRepeatKey = 0;
+	padRepeatNext = 0;
 	for ( int i = 0; i < DM_COMBO_MAX; i++ ) {
 		comboKeys[i] = 0;
 		comboDown[i] = false;
 	}
 
 	oskActive = false;
-	oskLayout = 0;
 	oskRow = 0;
 	oskCol = 0;
 }
@@ -775,12 +792,13 @@ void idDebugMenuLocal::Init( void ) {
 	comboNum = 0;
 	comboLatched = false;
 	comboParsed = false;
+	padRepeatKey = 0;
+	padRepeatNext = 0;
 	for ( int i = 0; i < DM_COMBO_MAX; i++ ) {
 		comboDown[i] = false;
 	}
 
 	oskActive = false;
-	oskLayout = 0;
 	oskRow = 0;
 	oskCol = 0;
 
@@ -895,6 +913,7 @@ void idDebugMenuLocal::Close( void ) {
 	editing = false;
 
 	oskActive = false;
+	padRepeatKey = 0;			// a direction held while the menu closes must not keep repeating
 	editField.Clear();
 	editField.ClearAutoComplete();
 
@@ -916,7 +935,6 @@ void idDebugMenuLocal::Open( const char *initialFilter ) {
 	editIsCommand = false;
 
 	oskActive = false;
-	oskLayout = 0;
 	oskRow = 0;
 	oskCol = 0;
 	selection = 0;
@@ -1757,6 +1775,109 @@ void idDebugMenuLocal::JoyKeyEvent( int key ) {
 	}
 }
 
+/*
+================
+idDebugMenuLocal::PadKeyRepeats
+
+Which pad directions the menu repeats while they are held down. Up and down
+walk the list (and the matches) a row at a time, so holding one of them
+scrolls it the way a held arrow key does, and the shoulders page the same way.
+The keyboard needs none of this - there the platform sends the repeats itself.
+Left and right repeat only while the on-screen keyboard is up, where they
+slide the cursor along the keys; in the list they switch tabs, and a tab
+nobody wants switched twenty times a second.
+================
+*/
+bool idDebugMenuLocal::PadKeyRepeats( int key ) const {
+	if ( oskActive ) {
+		switch ( key ) {
+			case K_JOY_DPAD_UP:
+			case K_JOY_DPAD_DOWN:
+			case K_JOY_DPAD_LEFT:
+			case K_JOY_DPAD_RIGHT:
+			case K_JOY_STICK1_UP:
+			case K_JOY_STICK1_DOWN:
+			case K_JOY_STICK1_LEFT:
+			case K_JOY_STICK1_RIGHT:
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	switch ( key ) {
+		case K_JOY_DPAD_UP:
+		case K_JOY_DPAD_DOWN:
+		case K_JOY_STICK1_UP:
+		case K_JOY_STICK1_DOWN:
+		case K_JOY_STICK2_UP:
+		case K_JOY_STICK2_DOWN:
+		case K_JOY_BTN_LSHOULDER:
+		case K_JOY_BTN_RSHOULDER:
+			return true;
+		default:
+			return false;
+	}
+}
+
+/*
+================
+idDebugMenuLocal::PadRepeatPress
+
+A pad direction went down: remember it, so that Draw() can run it again while
+it stays down. The press itself already happened - the caller does that - this
+only arms the repeat. A stick nothing moves sends no event at all, which is
+why the repeat has to be driven from the frame and not from the event.
+================
+*/
+void idDebugMenuLocal::PadRepeatPress( int key ) {
+	if ( dm_padRepeatDelay.GetInteger() <= 0 || !PadKeyRepeats( key ) ) {
+		padRepeatKey = 0;
+		return;
+	}
+	if ( padRepeatKey == key ) {
+		return;				// this direction is repeating already
+	}
+	padRepeatKey = key;
+	padRepeatNext = Sys_Milliseconds() + (unsigned int)dm_padRepeatDelay.GetInteger();
+}
+
+/*
+================
+idDebugMenuLocal::PadRepeatRelease
+================
+*/
+void idDebugMenuLocal::PadRepeatRelease( int key ) {
+	if ( padRepeatKey == key ) {
+		padRepeatKey = 0;
+	}
+}
+
+/*
+================
+idDebugMenuLocal::PadRepeatUpdate
+
+Called from Draw(), so once per frame: a direction that is still held down
+moves the way a held key does - one pause, then dbgmenu_padRepeatRate between
+the steps.
+================
+*/
+void idDebugMenuLocal::PadRepeatUpdate( void ) {
+	if ( padRepeatKey == 0 ) {
+		return;
+	}
+	if ( !dm_gamepad.GetBool() || dm_padRepeatDelay.GetInteger() <= 0 ) {
+		padRepeatKey = 0;		// the repeat was switched off while the key was held
+		return;
+	}
+	unsigned int now = Sys_Milliseconds();
+	if ( now < padRepeatNext ) {
+		return;
+	}
+	padRepeatNext = now + (unsigned int)dm_padRepeatRate.GetInteger();
+	JoyKeyEvent( padRepeatKey );
+}
+
 // ---------------------------------------------------------------------------
 // input handling
 // ---------------------------------------------------------------------------
@@ -1794,12 +1915,15 @@ bool idDebugMenuLocal::ProcessEvent( const sysEvent_t *event ) {
 
 	switch ( event->evType ) {
 		case SE_KEY:
-			if ( event->evValue2 == 1 && event->evValue ) {
-				if ( dm_gamepad.GetBool() && event->evValue >= K_FIRST_JOY && event->evValue <= K_LAST_JOY ) {
+			if ( dm_gamepad.GetBool() && event->evValue >= K_FIRST_JOY && event->evValue <= K_LAST_JOY ) {
+				if ( event->evValue2 == 1 && event->evValue ) {   // a pad button went down
 					JoyKeyEvent( event->evValue );
+					PadRepeatPress( event->evValue );   // and keeps moving while held
 				} else {
-					KeyDownEvent( event->evValue );
+					PadRepeatRelease( event->evValue ); // it was let go
 				}
+			} else if ( event->evValue2 == 1 && event->evValue ) {
+				KeyDownEvent( event->evValue );
 			}
 			return true;
 		case SE_CHAR:
@@ -1807,6 +1931,12 @@ bool idDebugMenuLocal::ProcessEvent( const sysEvent_t *event ) {
 			return true;
 		case SE_MOUSE:
 			return true;		// keep the view from spinning while browsing
+		case SE_JOYSTICK:
+			// the axis values the engine sends for the cursor of an in-game GUI
+			// (the PDA, an interactive GUI): idUserInterfaceLocal::HandleEvent()
+			// moves that cursor with both sticks, and with this menu open they
+			// belong to the menu
+			return true;
 		default:
 			return false;
 	}
@@ -2119,7 +2249,6 @@ void idDebugMenuLocal::OpenOsk( void ) {
 	}
 
 	oskActive = true;
-	oskLayout = 0;
 	oskRow = 0;
 	oskCol = 0;
 
@@ -2174,7 +2303,7 @@ char idDebugMenuLocal::OskChar( void ) const {
 		return 0;
 	}
 
-	row = dmOskLayout[oskLayout][oskRow];
+	row = dmOskKeys[oskRow];
 	if ( oskCol < 0 || oskCol >= (int)strlen( row ) ) {
 		return 0;
 	}
@@ -2190,21 +2319,14 @@ Walks the grid and wraps at its edges, so no key needs a special direction.
 ================
 */
 void idDebugMenuLocal::OskMove( int dRow, int dCol ) {
-	int len;
 
 	if ( dRow != 0 ) {
 		oskRow = ( oskRow + dRow + DM_OSK_ROWS ) % DM_OSK_ROWS;
 	}
 
-	len = (int)strlen( dmOskLayout[oskLayout][oskRow] );
-	if ( len <= 0 ) {
-		oskCol = 0;
-		return;
-	}
-
-	oskCol = ( oskCol + dCol ) % len;
-	if ( oskCol < 0 ) {
-		oskCol += len;
+	// every row holds all three blocks, so a row is always DM_OSK_KEYS long
+	if ( dCol != 0 ) {
+		oskCol = ( oskCol + dCol + DM_OSK_KEYS ) % DM_OSK_KEYS;
 	}
 }
 
@@ -2214,20 +2336,12 @@ idDebugMenuLocal::OskLayoutStep
 ================
 */
 void idDebugMenuLocal::OskLayoutStep( int delta ) {
-	int len;
+	int block;
 
-	oskLayout = ( oskLayout + delta + DM_OSK_LAYOUTS ) % DM_OSK_LAYOUTS;
+	block = ( oskCol / DM_OSK_COLS + delta + DM_OSK_BLOCKS ) % DM_OSK_BLOCKS;
+	oskCol = block * DM_OSK_COLS + oskCol % DM_OSK_COLS;
 
-	// the new layout may have a shorter row
-	len = (int)strlen( dmOskLayout[oskLayout][oskRow] );
-	if ( oskCol >= len ) {
-		oskCol = len - 1;
-	}
-	if ( oskCol < 0 ) {
-		oskCol = 0;
-	}
-
-	SetStatus( va( "keyboard: %s", dmOskLayoutName[oskLayout] ) );
+	SetStatus( va( "keyboard: %s", dmOskBlockName[block] ) );
 }
 
 /*
@@ -2252,12 +2366,10 @@ idDebugMenuLocal::OskBackspace
 ================
 */
 void idDebugMenuLocal::OskBackspace( void ) {
-	ClearMatches();
-	editField.KeyDownEvent( K_BACKSPACE );
-
-	if ( !editing ) {
-		SyncFilterFromEditField();
-	}
+	// idEditField deletes in CharEvent(), not in KeyDownEvent(): that one
+	// has no K_BACKSPACE branch at all, which is why the pad's X did
+	// nothing while the real Backspace worked (it arrives as a char).
+	CharEvent( K_BACKSPACE );
 }
 
 /*
@@ -2278,21 +2390,20 @@ void idDebugMenuLocal::DrawOsk( void ) {
 	panelColor = DM_COLOR_PANEL;
 	panelColor[3] = DM_COLOR_PANEL[3] * idMath::ClampFloat( 0.0f, 1.0f, dm_bgAlpha.GetFloat() );
 	DrawRectPixels( 0.0f, (float)( DM_ROW_LIST * DM_CHAR_H ), (float)DM_WIDTH,
-			(float)( ( DM_ROW_DESC2 - DM_ROW_LIST + 1 ) * DM_CHAR_H ), panelColor );
+			(float)( ( DM_ROW_DESC3 - DM_ROW_LIST + 1 ) * DM_CHAR_H ), panelColor );
 	DrawRowBar( DM_ROW_LIST, DM_COLOR_BAR );
 
-	sprintf( buffer, "KEYBOARD  %s", dmOskLayoutName[oskLayout] );
-	DrawText( 1, DM_ROW_LIST, buffer, DM_COLOR_TITLE );
+	DrawText( 1, DM_ROW_LIST, "KEYBOARD  abc / ABC / sym", DM_COLOR_TITLE );
 
 	// the line itself, caret and all
 	DM_InsertCaret( editField.GetBuffer(), editField.GetCursor(), buffer, sizeof( buffer ) );
 	DrawTextClipped( 1, DM_ROW_LIST + 1, DM_TailOfString( buffer, DM_COLS - 2 ), DM_COLOR_EDIT, DM_COLS - 2 );
 
 	for ( row = 0; row < DM_OSK_ROWS; row++ ) {
-		keys = dmOskLayout[oskLayout][row];
+		keys = dmOskKeys[row];
 		len = (int)strlen( keys );
 		for ( key = 0; key < len; key++ ) {
-			col = DM_OSK_LEFT + key * DM_OSK_CELL_W;
+			col = DM_OskKeyCol( key );
 			if ( row == oskRow && key == oskCol ) {
 				DrawRectPixels( (float)( col * DM_CHAR_W ), (float)( ( DM_OSK_ROW + row ) * DM_CHAR_H ),
 						(float)( DM_CHAR_W * 2 ), (float)DM_CHAR_H, DM_COLOR_SEL_BG );
@@ -2302,6 +2413,13 @@ void idDebugMenuLocal::DrawOsk( void ) {
 			DrawText( col, DM_OSK_ROW + row, buffer,
 					( row == oskRow && key == oskCol ) ? DM_COLOR_SEL : DM_COLOR_TEXT );
 		}
+	}
+
+	// the name of every block, the one the cursor is in standing out
+	for ( key = 0; key < DM_OSK_BLOCKS; key++ ) {
+		start = DM_OskKeyCol( key * DM_OSK_COLS );
+		DrawText( start, DM_OSK_LABEL_ROW, dmOskBlockName[key],
+				( oskCol / DM_OSK_COLS == key ) ? DM_COLOR_TITLE : DM_COLOR_DIM );
 	}
 
 	// what the engine offers for the line typed so far
@@ -2431,6 +2549,9 @@ void idDebugMenuLocal::Draw( void ) {
 		return;
 	}
 
+	// a pad direction that is held down keeps moving, like a held arrow key
+	PadRepeatUpdate();
+
 	// Keep a single player game stopped while this menu is open. The dhewm3
 	// settings menu (or a script) may have cleared g_stopTime in the meantime,
 	// and while this menu is open the player must stay safe.
@@ -2517,7 +2638,7 @@ void idDebugMenuLocal::Draw( void ) {
 	// last action and the key hints
 	DrawText( 1, DM_ROW_STATUS, status.c_str(), DM_COLOR_STATUS );
 	if ( oskActive ) {
-		DrawText( 1, DM_ROW_HINT1, "A types  X deletes  Y applies  B closes  LB/RB switch layout  LStick space", DM_COLOR_DIM );
+		DrawText( 1, DM_ROW_HINT1, "A types  X deletes  Y applies  B closes  LB/RB jump block  LStick space", DM_COLOR_DIM );
 	} else if ( MatchesActive() && editing ) {
 		DrawText( 1, DM_ROW_HINT1, "TAB next  UP/DOWN move  PGUP/PGDN page  HOME/END first/last  ENTER runs", DM_COLOR_DIM );
 	} else if ( MatchesActive() ) {
@@ -2618,7 +2739,7 @@ void idDebugMenuLocal::DrawMatches( void ) {
 
 	num = completeMatches.Num();
 	first = DM_ROW_LIST;
-	last = DM_ROW_DESC2;				// the panel covers list and details
+	last = DM_ROW_DESC3;				// the panel covers list and details
 	rows = last - first;				// every row below its own header
 
 	// the panel follows dbgmenu_bgAlpha the way the menu background does
@@ -2694,21 +2815,25 @@ void idDebugMenuLocal::DrawCvarInfo( const char *name ) {
 			( cvar->GetFlags() & CVAR_FLOAT ) ? "float" : "string" );
 	DrawTextClipped( 1, DM_ROW_INFO, buffer, DM_COLOR_TITLE, DM_COLS - 2 );
 
-	// current value
+	// value, range and flags share the value line, so the description below
+	// has all three of its lines to itself
 	if ( range[0] ) {
-		sprintf( buffer, "value: %s   %s", cvar->GetString(), range );
+		sprintf( buffer, "value: %s   %s   flags: %s", cvar->GetString(), range, flags );
 	} else {
-		sprintf( buffer, "value: %s", cvar->GetString() );
+		sprintf( buffer, "value: %s   flags: %s", cvar->GetString(), flags );
 	}
 	DrawTextClipped( 1, DM_ROW_VALUE, buffer, DM_COLOR_TEXT, DM_COLS - 2 );
 
-	// flags and the possible values of an enum style CVar
-	sprintf( buffer, "flags: %s", flags );
-	DrawTextClipped( 1, DM_ROW_DESC1, buffer, DM_COLOR_DIM, DM_COLS - 2 );
+	// description, up to three lines of it
+	{
+		const char *rest = cvar->GetDescription();
+		int row;
 
-	// description
-	DM_WrapText( cvar->GetDescription(), DM_COLS - 2, buffer, sizeof( buffer ) );
-	DrawTextClipped( 1, DM_ROW_DESC2, buffer, DM_COLOR_TEXT, DM_COLS - 2 );
+		for ( row = DM_ROW_DESC1; row <= DM_ROW_DESC3 && rest != NULL && rest[0] != '\0'; row++ ) {
+			rest = DM_WrapText( rest, DM_COLS - 2, buffer, sizeof( buffer ) );
+			DrawTextClipped( 1, row, buffer, DM_COLOR_TEXT, DM_COLS - 2 );
+		}
+	}
 }
 
 /*
@@ -2734,16 +2859,26 @@ void idDebugMenuLocal::DrawCommandInfo( const char *name ) {
 		DM_FlagsToString( dmCmdFlagNames, dmNumCmdFlagNames, cmdSystem->GetCommandFlags( i ), flags, sizeof( flags ) );
 		sprintf( buffer, "command  flags: %s", flags );
 		DrawTextClipped( 1, DM_ROW_VALUE, buffer, DM_COLOR_DIM, DM_COLS - 2 );
-		DM_WrapText( cmdSystem->GetCommandDescription( i ), DM_COLS - 2, buffer, sizeof( buffer ) );
-		DrawTextClipped( 1, DM_ROW_DESC1, buffer, DM_COLOR_TEXT, DM_COLS - 2 );
+		// the description, up to three lines of it, the ENTER hint in the
+		// first line the text did not need
+		{
+			const char *rest = cmdSystem->GetCommandDescription( i );
+			int row;
+
+			for ( row = DM_ROW_DESC1; row <= DM_ROW_DESC3 && rest != NULL && rest[0] != '\0'; row++ ) {
+				rest = DM_WrapText( rest, DM_COLS - 2, buffer, sizeof( buffer ) );
+				DrawTextClipped( 1, row, buffer, DM_COLOR_TEXT, DM_COLS - 2 );
+			}
+			if ( row <= DM_ROW_DESC3 ) {
+				DrawText( 1, row, "ENTER prepares the command line", DM_COLOR_DIM );
+			}
+		}
 		break;
 	}
 
 	if ( !found ) {
 		DrawTextClipped( 1, DM_ROW_VALUE, "command was removed", DM_COLOR_DIM, DM_COLS - 2 );
 	}
-
-	DrawText( 1, DM_ROW_DESC2, "ENTER prepares the command line", DM_COLOR_DIM );
 }
 
 /*
@@ -2754,6 +2889,7 @@ idDebugMenuLocal::DrawActionInfo
 void idDebugMenuLocal::DrawActionInfo( int actionIndex ) {
 	char	buffer[512];
 	char	temp[128];
+	const char *desc;
 
 	if ( actionIndex < 0 || actionIndex >= dmNumActions ) {
 		return;
@@ -2778,15 +2914,25 @@ void idDebugMenuLocal::DrawActionInfo( int actionIndex ) {
 	DrawTextClipped( 1, DM_ROW_VALUE, buffer, DM_COLOR_TEXT, DM_COLS - 2 );
 
 	if ( action.kind == DM_ACTION_COMMAND ) {
-		DM_WrapText( "Runs right away through the command buffer.", DM_COLS - 2, temp, sizeof( temp ) );
-		DrawTextClipped( 1, DM_ROW_DESC1, temp, DM_COLOR_DIM, DM_COLS - 2 );
+		desc = "Runs right away through the command buffer.";
 	} else if ( action.kind == DM_ACTION_CVAR_BOOL ) {
-		DM_WrapText( "Flips the value of an engine CVar.", DM_COLS - 2, temp, sizeof( temp ) );
-		DrawTextClipped( 1, DM_ROW_DESC1, temp, DM_COLOR_DIM, DM_COLS - 2 );
+		desc = "Flips the value of an engine CVar.";
 	} else {
-		DM_WrapText( "Handled inside the debug menu.", DM_COLS - 2, temp, sizeof( temp ) );
-		DrawTextClipped( 1, DM_ROW_DESC1, temp, DM_COLOR_DIM, DM_COLS - 2 );
+		desc = "Handled inside the debug menu.";
 	}
 
-	DrawTextClipped( 1, DM_ROW_DESC2, "ENTER executes", DM_COLOR_TEXT, DM_COLS - 2 );
+	// the description, up to three lines of it, the ENTER hint in the first
+	// line the text did not need
+	{
+		const char *rest = desc;
+		int row;
+
+		for ( row = DM_ROW_DESC1; row <= DM_ROW_DESC3 && rest != NULL && rest[0] != '\0'; row++ ) {
+			rest = DM_WrapText( rest, DM_COLS - 2, temp, sizeof( temp ) );
+			DrawTextClipped( 1, row, temp, DM_COLOR_DIM, DM_COLS - 2 );
+		}
+		if ( row <= DM_ROW_DESC3 ) {
+			DrawText( 1, row, "ENTER executes", DM_COLOR_TEXT );
+		}
+	}
 }

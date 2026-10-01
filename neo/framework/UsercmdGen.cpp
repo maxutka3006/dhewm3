@@ -34,6 +34,7 @@ If you have questions concerning this license or the applicable additional terms
 #include "framework/async/AsyncNetwork.h"
 
 #include "framework/UsercmdGen.h"
+#include "framework/DebugMenu.h"	// while the menu is open the sticks are its
 
 /*
 ================
@@ -933,6 +934,13 @@ idUsercmdGenLocal::JoystickMove
 =================
 */
 void idUsercmdGenLocal::JoystickMove() {
+	// While the debug menu is open the sticks drive it, not the player. The
+	// menu reads their K_JOY_STICK_* events from the event queue, so cutting
+	// the axes out here takes nothing away from it.
+	if ( debugMenu != NULL && debugMenu->Active() ) {
+		return;
+	}
+
 	float threshold = joy_deadZone.GetFloat();
 	float triggerThreshold = joy_triggerThreshold.GetFloat();
 
@@ -1310,11 +1318,21 @@ idUsercmdGenLocal::Joystick
 void idUsercmdGenLocal::Joystick( void ) {
 	int numEvents = Sys_PollJoystickInputEvents( 0 );
 
+	// While the debug menu is open the pad belongs to it: its buttons reach the
+	// menu as K_JOY_* key events, which the menu reads from the event queue
+	// itself. The events polled here are still taken off the buffer - left in
+	// it they would pile up and all be applied at once the moment the menu
+	// closes - they only stop reaching the game.
+	const bool menuHasThePad = ( debugMenu != NULL && debugMenu->Active() );
+
 	// Study each of the buffer elements and process them.
 	for ( int i = 0; i < numEvents; i++ ) {
 		int action;
 		int value;
 		if ( Sys_ReturnJoystickInputEvent( i, action, value ) ) {
+			if ( menuHasThePad ) {
+				continue;
+			}
 			if ( action >= J_ACTION_FIRST && action <= J_ACTION_MAX ) {
 				int joyButton = K_FIRST_JOY + ( action - J_ACTION_FIRST );
 				Key( joyButton, ( value != 0 ) );
