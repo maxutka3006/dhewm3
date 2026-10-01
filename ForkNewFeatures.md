@@ -4,6 +4,15 @@ This fork has an in-game debug menu that lists all CVars, all console commands a
 actions, and it can be opened while the game is running. It is drawn with the console font
 (`textures/bigchars`, through `idRenderSystem::DrawSmallStringExt`) and is toggled with `F11` by default.  
 
+It is engine code and not game code: the menu is `neo/framework/DebugMenu.cpp`, compiled into the
+executable itself alongside the rest of `framework/` in `neo/CMakeLists.txt`, and the CVars it adds
+are static in that file. Where the menu lives is decided by the file it is compiled into and not by a
+flag: it does carry `CVAR_SYSTEM`, but so do `com_forceGenericSIMD` and `net_clientMaxPrediction` in
+`neo/game` and `neo/d3xp`, and the flag only picks the `SYS` label in `listCvar -flags`. It reads what
+it lists out of the engine's systems (`cvarSystem`, `cmdSystem`), so no game module is involved and
+the same menu serves the base game, RoE and a mod alike. The debug free camera further down is the
+other way round - that one is game logic.
+
 While the menu is open in a Single Player game, the game is stopped (through `g_stopTime`, the same
 CVar the dhewm3 Settings Menu uses), so you're safe from monsters while browsing - the game is still
 on the screen behind the menu. In multiplayer the menu doesn't stop the game.
@@ -78,9 +87,12 @@ Buttons while the menu is open:
   the direction repeating after `dbgmenu_padRepeatDelay` and then every `dbgmenu_padRepeatRate`.
   In the list only up and down repeat - left and right switch the lists - and on the on-screen
   keyboard all four directions slide the cursor along the keys, while the right stick repeats its
-  up and down over the matches both there and in the list. `LB`/`RB` repeat as well, unless
-  they are part of `dbgmenu_gamepadCombo`: a combination button reaches the menu when it is
-  released, so there is no hold to repeat.
+  up and down over the matches both there and in the list. `LB`/`RB` repeat as well, even
+  though they are part of `dbgmenu_gamepadCombo`: a combination button reaches the menu when it
+  is released, so holding one down with no chord coming waits out `dbgmenu_padRepeatDelay` first
+  and only then starts paging - a held `LB`/`RB` scrolls pages at the same pace as a held
+  `PGUP`/`PGDN`. With the on-screen keyboard up they do not repeat, since there they step to the
+  next block.
 - the on-screen keyboard: `A` types the highlighted key, `X` deletes one character, `Y` applies the
   line and puts the keyboard away, `B` puts it away and keeps typing in the line, `LB`/`RB` jump to the next block, and all three of them (`abc` / `ABC` / `sym`) are on the
   screen at once, the DPad and the left stick walk the keys, pressing the left
@@ -103,6 +115,19 @@ did not need.
 The `freeCam` command and the `dbg_freeCam` CVar let you freeze the view and fly it around, also
 while a cinematic is running. They're meant for debugging and are marked as cheats, so in multiplayer
 they can only be changed if `net_allowCheats` is set (in Single Player they always work).
+
+Unlike the debug menu, the free camera is game logic and not engine code. Each game module carries its
+own copy - `neo/game` for the base game and `neo/d3xp` for RoE - with the CVars in that module's
+`gamesys/SysCvar.cpp` under `CVAR_GAME` and the behaviour in its `Player.cpp`, `Entity.cpp` and
+`gamesys/SysCmds.cpp`, so a change here has to be made in both modules for the base game and RoE to
+get it. These CVars become known when the engine loads the module, and that happens at startup, not
+with a map: `idCommonLocal::InitGame()` reaches `LoadGameDLL()` and `game->Init()`, and a map is
+loaded after that. So `dbg_freeCam` is registered as soon as the game starts, and
+`cvarSystem->Find( "dbg_freeCam" )` comes back empty only until the module is up, or while a
+different module is the one running. The only part of it that is engine code is the stick input:
+`dbg_freeCam_pad` in `neo/framework/UsercmdGen.cpp`, whose `FreeCamStickMoves()` writes the move the
+camera flies off and looks the game's `dbg_freeCam` up by name, since the engine cannot link to a
+symbol of the game module.
 
 ```
 freeCam 0|1|2              mode
@@ -138,10 +163,12 @@ The CVars behind it:
 - `dbg_freeCam_body` if set to `1` (the default), the eye is detached from the player: the player's
   own body is drawn and there's no first-person weapon.
 - `dbg_freeCam_speed` the fly speed in units per second. Defaults to `400`.
-- `dbg_freeCam_pad` if set to `1`, a gamepad flies that camera with its own sticks instead of the
-  keys they are bound to. How far the left stick is tilted is the speed, so half a stick flies at
-  half speed, and the triggers fly it up and down; a bound stick is on or off, so without this any
-  tilt past `joy_deadZone` flies at all of `dbg_freeCam_speed`. Looking is left to the look actions
+- `dbg_freeCam_pad` if set to `1` (the default), the tilt of a stick is what the speed of that camera is: how
+  far the left stick is pushed past `joy_deadZone` is how much of `dbg_freeCam_speed` the camera
+  flies at, so half a stick flies at half speed, and the triggers fly it up and down the same way.
+  The left stick does not have to be bound for this. With the `0` the binds alone fly the
+  camera, and since it normalizes the direction they give it and takes the speed from
+  `dbg_freeCam_speed`, any tilt past `joy_deadZone` flies at all of it. Looking is left to the look actions
   the right stick is bound to, which already scale their turn rate by the tilt (`joy_yawSpeed`,
   `joy_pitchSpeed`, `joy_powerScale`). Defaults to `1`; it only does anything while the `dbg_freeCam 2`
   camera is flying and the debug menu is closed. Works in the base game and in `d3xp` alike.

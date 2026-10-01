@@ -649,6 +649,7 @@ private:
 	void					PadRepeatPress( int key );
 	void					PadRepeatRelease( int key );
 	void					PadRepeatUpdate( void );
+	void					ComboHoldUpdate( void );
 
 	// on-screen keyboard
 	void					OpenOsk( void );
@@ -701,6 +702,11 @@ private:
 	bool					comboDown[DM_COMBO_MAX];
 	bool					comboLatched;
 	bool					comboParsed;
+
+	// gamepad: a button of the combination that is being held down with no
+	// chord coming, and when the frame may stop waiting and act on it
+	unsigned int			comboHoldNext[DM_COMBO_MAX];
+	bool					comboHoldFired[DM_COMBO_MAX];
 
 	// gamepad: the direction that is held down right now, and when it repeats
 	int						padRepeatKey;
@@ -760,6 +766,8 @@ idDebugMenuLocal::idDebugMenuLocal( void ) {
 	for ( int i = 0; i < DM_COMBO_MAX; i++ ) {
 		comboKeys[i] = 0;
 		comboDown[i] = false;
+		comboHoldNext[i] = 0;
+		comboHoldFired[i] = false;
 	}
 
 	oskActive = false;
@@ -796,6 +804,8 @@ void idDebugMenuLocal::Init( void ) {
 	padRepeatNext = 0;
 	for ( int i = 0; i < DM_COMBO_MAX; i++ ) {
 		comboDown[i] = false;
+		comboHoldNext[i] = 0;
+		comboHoldFired[i] = false;
 	}
 
 	oskActive = false;
@@ -1494,6 +1504,8 @@ void idDebugMenuLocal::ParseCombo( void ) {
 	comboLatched = false;
 	for ( i = 0; i < DM_COMBO_MAX; i++ ) {
 		comboDown[i] = false;
+		comboHoldNext[i] = 0;
+		comboHoldFired[i] = false;
 	}
 
 	p = dm_gamepadCombo.GetString();
@@ -1608,6 +1620,10 @@ bool idDebugMenuLocal::JoyComboEvent( const sysEvent_t *event ) {
 
 	if ( down ) {
 		if ( ComboComplete() ) {
+			for ( i = 0; i < DM_COMBO_MAX; i++ ) {
+				comboHoldNext[i] = 0;		// the chord came after all,
+				comboHoldFired[i] = false;	// so none of these is a button of its own
+			}
 			if ( !comboLatched ) {
 				comboLatched = true;
 				Toggle();
@@ -1616,6 +1632,15 @@ bool idDebugMenuLocal::JoyComboEvent( const sysEvent_t *event ) {
 		}
 		if ( event->evValue == K_ESCAPE ) {
 			return false;		// a plain ESC: the menu and the game keep it
+		}
+		if ( active && slot >= 0 && dm_padRepeatDelay.GetInteger() > 0 ) {
+			// LB and RB page on their own as well, but a button of the combination
+			// is held back until it is released, because the chord has to get its
+			// chance first. Arm a timer for it here: ComboHoldUpdate() starts it
+			// paging if the rest of the combination is still not there by the time
+			// dbgmenu_padRepeatDelay has passed.
+			comboHoldNext[slot] = Sys_Milliseconds() + (unsigned int)dm_padRepeatDelay.GetInteger();
+			comboHoldFired[slot] = false;
 		}
 		return active;			// wait for the release, this may be a chord
 	}
@@ -1634,7 +1659,17 @@ bool idDebugMenuLocal::JoyComboEvent( const sysEvent_t *event ) {
 		comboLatched = false;
 	}
 	if ( active && event->evValue != K_ESCAPE ) {
-		JoyKeyEvent( event->evValue );		// it was a single button after all
+		if ( slot >= 0 ) {
+			comboHoldNext[slot] = 0;		// it is not waiting for anything any more
+		}
+		if ( slot >= 0 && comboHoldFired[slot] ) {
+			// it was a hold and not a tap: the action already ran when the repeat
+			// did, so letting go only ends the repeat
+			comboHoldFired[slot] = false;
+			PadRepeatRelease( event->evValue );
+		} else {
+			JoyKeyEvent( event->evValue );		// it was a single button after all
+		}
 		return true;
 	}
 	return false;
@@ -1900,6 +1935,52 @@ void idDebugMenuLocal::PadRepeatUpdate( void ) {
 	}
 	padRepeatNext = now + (unsigned int)dm_padRepeatRate.GetInteger();
 	JoyKeyEvent( padRepeatKey );
+}
+
+/*
+================
+idDebugMenuLocal::ComboHoldUpdate
+
+Called from Draw(), so once per frame. A button of the opening combination is
+held back while the menu is open, because the chord it may start has to get
+its chance first. If the rest of the combination is still not there when
+dbgmenu_padRepeatDelay passes, no chord was being pressed and the button is
+what it would have been on its own. One that the menu repeats while it is
+held - LB and RB, paging the list or the matches - starts repeating here, so
+holding it scrolls pages as a held PGUP or PGDN does.
+
+A button that does nothing while held is left alone: Back brings the
+on-screen keyboard up and waits for the release as it always did, and so do
+LB and RB while that keyboard is up, where they step to the next block
+instead of paging. Only one press then, not twenty a second.
+================
+*/
+void idDebugMenuLocal::ComboHoldUpdate( void ) {
+	int				i;
+	unsigned int	now;
+
+	if ( !active || !dm_gamepad.GetBool() || dm_padRepeatDelay.GetInteger() <= 0 ) {
+		return;
+	}
+
+	now = Sys_Milliseconds();
+	for ( i = 0; i < comboNum; i++ ) {
+		if ( comboHoldFired[i] || !comboDown[i] || comboHoldNext[i] == 0 ) {
+			continue;			// nothing waiting, or already acting
+		}
+		if ( (int)( now - comboHoldNext[i] ) < 0 ) {
+			continue;			// its pause is not over yet
+		}
+		if ( !PadKeyRepeats( comboKeys[i] ) ) {
+			// a held button does nothing in this state, so it stays what it was:
+			// one press, and only when it is released
+			comboHoldNext[i] = 0;
+			continue;
+		}
+		comboHoldFired[i] = true;
+		JoyKeyEvent( comboKeys[i] );		// the press it was held back from making
+		PadRepeatPress( comboKeys[i] );	// and it keeps paging while it is held
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -2572,6 +2653,11 @@ void idDebugMenuLocal::Draw( void ) {
 	if ( !bigCharShader || !whiteShader ) {
 		return;
 	}
+
+	// a button of the opening combination that was held down with no chord
+	// coming turns into a plain held button here, which is what lets LB and RB
+	// scroll pages the way a held PGUP and PGDN do
+	ComboHoldUpdate();
 
 	// a pad direction that is held down keeps moving, like a held arrow key
 	PadRepeatUpdate();

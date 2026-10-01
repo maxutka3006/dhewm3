@@ -18,10 +18,13 @@ Fork Changes
   - a direction held on the DPad or on a stick repeats, so the list scrolls the way it does with a
     held arrow key: up/down repeat after `dbgmenu_padRepeatDelay` and then every
     `dbgmenu_padRepeatRate`, and on the on-screen keyboard all four directions slide the cursor
-    along the keys. Left and right do not repeat in the list (they switch it), and `LB`/`RB` only
-    when they are not part of `dbgmenu_gamepadCombo` - a combo button reaches the menu on release,
-    so it has no hold to repeat. The repeat runs off the frame, because a stick that nothing moves
-    sends no event at all while it is held
+    along the keys. Left and right do not repeat in the list (they switch it). `LB`/`RB` repeat as
+    well, even though they are part of `dbgmenu_gamepadCombo`: a button of the combination is
+    held back until it is released, so one that is held down with no chord coming waits out
+    `dbgmenu_padRepeatDelay` and only then becomes a plain held button - which is what lets a
+    page scroll off `LB`/`RB` at the same pace as off a held `PGUP`/`PGDN`. With the on-screen
+    keyboard up they still do not repeat, because there they step to the next block. The repeat
+    runs off the frame, because a stick that nothing moves sends no event at all while it is held
   - fixed: `X` on the on-screen keyboard deletes a character again. `idEditField` deletes in
     `CharEvent()`; `KeyDownEvent()` has no `K_BACKSPACE` branch, which is why the pad's X did nothing
     while the real `Backspace` worked
@@ -53,6 +56,9 @@ Fork Changes
     (`dbgmenu_padRepeatDelay`, default `400` ms, and `dbgmenu_padRepeatRate`, default `50` ms);
     the right stick's up and down walk the matches of the line, held down or tapped, on the list
     and with the on-screen keyboard up alike
+  - it is engine code and not game code: `neo/framework/DebugMenu.cpp`, compiled into the executable
+    with the rest of `framework/`, so no game module is involved and the same menu serves the base
+    game, RoE and mods
 
 * Implemented free (debug) camera (also works in cinematics): via 'freeCam' command or 'dbg_freeCam' CVar (1: freeze the camera, 2: full flight mode)
   - `freeCam 0|1|2`, `freeCam here`, `freeCam pos <x> <y> <z>`, `freeCam angles <p> <y> <r>`,
@@ -68,11 +74,19 @@ Fork Changes
   - `freeCamTeleport [1|2]` puts the player body at the point the debug camera is looking from,
     with the camera's angles; the number is the freeCam mode the call was meant for and only
     decides which warning is printed
-  - `dbg_freeCam_pad` (default `1`) flies the `dbg_freeCam 2` camera with the analog sticks
-    instead of the bound keys: how far the left stick is tilted is the speed (half a stick flies
-    at half of `dbg_freeCam_speed`), and the triggers fly it up and down. A bound stick is on or
-    off, so without this any tilt past the dead zone flies at the full speed
-* Added CVar 'pm_ignoreVacuum': Ignores the air/vacuum logic by forcing 'newAirless' to false. Additionally, freeCam 2 (flight mode) now also forces this variable to false.
+  - `dbg_freeCam_pad` (default `1`) flies the `dbg_freeCam 2` camera at the tilt of a stick
+    instead of at what the binds make of it: how far the left stick is pushed past `joy_deadZone`
+    is how much of `dbg_freeCam_speed` the camera gets (half a stick flies at half speed), and the
+    triggers fly it up and down the same way. The left stick does not have to be bound to anything
+    for this. With `0` the binds alone fly the camera, and since it normalizes the direction they
+    give it and takes the speed from `dbg_freeCam_speed`, any tilt past the dead zone flies at all
+    of it
+  - unlike the menu, this is game logic, not engine code: a copy per game module (`neo/game` for the
+    base game, `neo/d3xp` for RoE), with the CVars declared under `CVAR_GAME` in that module's
+    `gamesys/SysCvar.cpp`, so `dbg_freeCam` is registered at startup with the module - not with a map
+    - and a change has to be made in both modules; the only engine part of it is `dbg_freeCam_pad` in
+    `neo/framework/UsercmdGen.cpp`
+* Added game CVar 'pm_ignoreVacuum': Ignores the air/vacuum logic by forcing 'newAirless' to false. Additionally, freeCam 2 (flight mode) now also forces this variable to false.
 * See `ForkNewFeatures.md` for the full description of the debug menu and the debug free camera.
 
 

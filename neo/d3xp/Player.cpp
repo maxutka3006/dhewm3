@@ -5962,14 +5962,19 @@ void idPlayer::FreeCamFly( void ) {
 	// position: fly along the anchor's own axes (axis[0] forward, axis[1] left, axis[2] up)
 	dir = idVec3( (float)cmd.forwardmove, -(float)cmd.rightmove, (float)cmd.upmove );
 	if ( dir.LengthSqr() > 0.0f ) {
-		// the command is a signed char, so 127 is "all the way": a key press always
-		// fills it out, while a stick that dbg_freeCam_pad flies the camera with says
-		// by its tilt how far it is pushed (idUsercmdGenLocal::FreeCamStickMoves). So
-		// take the speed off the length, before the direction is normalized away - a
-		// mixed command is never faster than a plain one either way
-		float speedScale = dir.Length() / 127.0f;
-		if ( speedScale > 1.0f ) {
-			speedScale = 1.0f;
+		// dbg_freeCam_pad only: the command is a signed char and 127 is "all the way",
+		// so its length says how far the stick that wrote it is pushed
+		// (idUsercmdGenLocal::FreeCamStickMoves) - half a stick, half of the speed.
+		// Read it before the direction is normalized away; a mixed command is never
+		// faster than a plain one either way. Without the CVar the binds decide the
+		// command on their own, and the camera flies at all of dbg_freeCam_speed
+		// whatever they asked for.
+		float speedScale = 1.0f;
+		if ( cvarSystem->GetCVarInteger( "dbg_freeCam_pad" ) != 0 ) {
+			speedScale = dir.Length() / 127.0f;
+			if ( speedScale > 1.0f ) {
+				speedScale = 1.0f;
+			}
 		}
 
 		dir.Normalize();

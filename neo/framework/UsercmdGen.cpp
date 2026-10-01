@@ -456,11 +456,12 @@ idCVar joy_dampenLook( "joy_dampenLook", "1", CVAR_BOOL | CVAR_ARCHIVE, "Do not 
 idCVar joy_deltaPerMSLook( "joy_deltaPerMSLook", "0.003", CVAR_FLOAT | CVAR_ARCHIVE, "Max amount to be added on look per MS" );
 
 // The debug free camera (dbg_freeCam, a CVar of the game module) flies off the very
-// usercmd the player gets, and a stick bound to a move key is on or off: the bind
-// adds the whole move as soon as the tilt passes the dead zone, so that camera
-// always flies at one speed. With this on, the tilt itself is the speed.
+// usercmd the player gets, and it normalizes the direction it finds there and takes
+// its speed from dbg_freeCam_speed, so however much of the move the binds asked for
+// it flies at one speed. With this on, the tilt of the stick that wrote the move is
+// the speed itself, and the stick does not have to be bound to anything.
 idCVar dbg_freeCam_pad( "dbg_freeCam_pad", "1", CVAR_ARCHIVE | CVAR_BOOL,
-	"1 = the left stick flies the frozen debug camera (dbg_freeCam 2) at how far it is tilted, and the triggers fly it up and down, instead of the bound keys being on or off" );
+	"1 = how far the left stick is tilted is the speed of the frozen debug camera (dbg_freeCam 2), and the triggers fly it up and down; 0 = the bound keys alone, which fly it at the whole of dbg_freeCam_speed as soon as the tilt passes joy_deadZone" );
 
 idCVar in_useGamepad( "in_useGamepad", "1", CVAR_ARCHIVE | CVAR_BOOL, "enables/disables the gamepad for PC use" );
 
@@ -984,25 +985,48 @@ void idUsercmdGenLocal::JoystickMove() {
 
 /*
 =================
+DM_PadTilt
+
+How far an axis is pushed past the dead zone: 0 at its edge, 1 at the very end.
+That is the shape HandleJoystickAxis() gives a bound stick, and the camera reads
+the axes this function writes the same way, so it answers the tilt the same
+whether the stick is bound to a move key or not.
+=================
+*/
+static float DM_PadTilt( float axis, float threshold ) {
+	if ( axis > threshold ) {
+		return ( axis - threshold ) / ( 1.0f - threshold );
+	}
+	if ( axis < -threshold ) {
+		return ( axis + threshold ) / ( 1.0f - threshold );
+	}
+	return 0.0f;
+}
+
+/*
+=================
 idUsercmdGenLocal::FreeCamStickMoves
 
 The frozen debug camera (dbg_freeCam 2) flies off the very usercmd the player
-gets, and a stick bound to a move key is on or off: as soon as the tilt passes
-the dead zone the bind adds the whole move, so the camera flies at one speed
-whatever the stick says. With dbg_freeCam_pad the tilt itself becomes that
-move, written once per frame, so half a stick flies at half speed.
+gets, and the binds only say which way and how much: the camera normalizes the
+direction it finds there and takes its speed from dbg_freeCam_speed, so it flies
+at one speed whatever a bound key asked for. With dbg_freeCam_pad on, this
+writes the tilt of the stick into that move instead, once per frame, so the tilt
+is what the game turns into the speed - half a stick flies at half speed.
 
 Only the movement needs this - the look actions already scale the turn rate by
 the axis value. The values go into cmd.forwardmove/rightmove/upmove, which the
 game reads for the camera and zeroes for the body while it flies, so none of
-this reaches the player. A stick inside its dead zone is left alone, so the
-binds keep whatever command they set.
+this reaches the player. A stick inside its dead zone leaves its axis at zero,
+so the binds keep whatever command they set, and the axes are shaped the way
+HandleJoystickAxis() shapes a bound stick, so the answer to a given tilt is the
+same whether the stick is bound or not.
 =================
 */
 void idUsercmdGenLocal::FreeCamStickMoves( void ) {
 	idCVar	*freeCam = cvarSystem->Find( "dbg_freeCam" );
 	idCVar	*pad = cvarSystem->Find( "dbg_freeCam_pad" );
-	float	trigUp, trigDown, threshold, axis_x, axis_y, up;
+	float	trigUp, trigDown, threshold, axis_x, axis_y, tilt_x, tilt_y, up;
 
 	// the game module owns dbg_freeCam, so it is missing until a map is loaded
 	if ( freeCam == NULL || pad == NULL || pad->GetInteger() == 0 || freeCam->GetInteger() < 2 ) {
@@ -1016,12 +1040,16 @@ void idUsercmdGenLocal::FreeCamStickMoves( void ) {
 	CircleToSquare( axis_x, axis_y );
 
 	// up on the stick is negative, and the camera flies along
-	// (forwardmove, -rightmove, upmove): the tilt is the length of that move
-	if ( idMath::Fabs( axis_y ) > threshold ) {
-		cmd.forwardmove = idMath::ClampChar( idMath::Ftoi( -axis_y * KEY_MOVESPEED ) );
+	// (forwardmove, -rightmove, upmove): the tilt is the length of that move,
+	// and what the game turns into the speed (idPlayer::FreeCamFly)
+	tilt_y = DM_PadTilt( axis_y, threshold );
+	tilt_x = DM_PadTilt( axis_x, threshold );
+
+	if ( tilt_y != 0.0f ) {
+		cmd.forwardmove = idMath::ClampChar( idMath::Ftoi( -tilt_y * KEY_MOVESPEED ) );
 	}
-	if ( idMath::Fabs( axis_x ) > threshold ) {
-		cmd.rightmove = idMath::ClampChar( idMath::Ftoi( axis_x * KEY_MOVESPEED ) );
+	if ( tilt_x != 0.0f ) {
+		cmd.rightmove = idMath::ClampChar( idMath::Ftoi( tilt_x * KEY_MOVESPEED ) );
 	}
 
 	// the triggers are the only axes left for the vertical, and a stick cannot
@@ -1036,13 +1064,10 @@ void idUsercmdGenLocal::FreeCamStickMoves( void ) {
 	if ( trigDown < 0.0f ) {
 		trigDown = 0.0f;
 	}
-	up = trigUp - trigDown;
-	if ( up > 1.0f ) {
-		up = 1.0f;
-	} else if ( up < -1.0f ) {
-		up = -1.0f;
-	}
-	if ( idMath::Fabs( up ) > threshold ) {
+	// each one is 0 at the edge of the dead zone and 1 all the way down, so the
+	// difference is already within -1..1 and holds to the same curve as the sticks
+	up = DM_PadTilt( trigUp, threshold ) - DM_PadTilt( trigDown, threshold );
+	if ( up != 0.0f ) {
 		cmd.upmove = idMath::ClampChar( idMath::Ftoi( up * KEY_MOVESPEED ) );
 	}
 }
