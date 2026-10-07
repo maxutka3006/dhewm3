@@ -1,8 +1,9 @@
 ## Debug Menu
 
 This fork has an in-game debug menu that lists all CVars, all console commands and a few ready-made
-actions, and it can be opened while the game is running. It is drawn with the console font
-(`textures/bigchars`, through `idRenderSystem::DrawSmallStringExt`) and is toggled with `F11` by default.  
+actions, and it can be opened while the game is running. A config file of its own can add a fourth
+list of actions to it (see Custom Actions below). It is drawn with the console font
+(`textures/bigchars`, through `idRenderSystem::DrawSmallStringExt`) and is toggled with `F11` by default.
 
 It is engine code and not game code: the menu is `neo/framework/DebugMenu.cpp`, compiled into the
 executable itself alongside the rest of `framework/` in `neo/CMakeLists.txt`, and the CVars it adds
@@ -109,6 +110,48 @@ Under the list, the selected entry shows its name and type, its current value an
 For a CVar the `flags:` and the possible range sit on the value line, which is what frees the third
 line; for a command or an action the `ENTER` hint moves into the first description line the text
 did not need.
+
+### Custom Actions
+
+The actions compiled into the menu are one list; a config file of your own can add a second one.
+`dmCustomActions.cfg` is looked for in the config folder first (`fs_configpath`: `~/.config/dhewm3` on
+Linux, the `My Games/dhewm3` folder in Documents on Windows) and in the game resources after that
+(`base/`, `d3xp/`, a mod or a `.pk4`, packed or loose), so a file of your own wins over one a game or a
+mod ships. What it holds shows up on a **CUSTOM ACTIONS** tab of its own, after `ACTIONS`, and `TAB`
+and the DPad's left and right walk to it like to any other list.
+
+A line of the file is
+
+```
+kind label = target
+```
+
+with the kind one of
+
+- `command` (or `cmd`) - the target is a console command line, run right away:
+  `command Give all = give all`
+- `cvarbool` (or `toggle`) - the target is the name of a boolean CVar, which gets flipped:
+  `cvarbool Show FPS = com_showFPS`
+- `internal` (or `menu`) - the target is one of the codes the menu handles itself, `#refresh`,
+  `#clearfilter`, `#close` or `#reload`: `internal Reload = #reload`
+
+`#reload` reads this file over again, which is what a file being worked on needs. Empty lines and whole
+lines starting with `//` or `#` are comments - there are none behind the `=`, where a command line may
+hold anything.
+
+The menu's font draws plain ASCII only, so a label or a target that carries anything else would come
+out as nonsense, and a line with one is refused together with a line without a kind, a label or a
+target, one with a kind or a code the menu does not have, one whose label is already on the list, and
+everything past the 64th action. Each of them says why it was skipped in the log.
+
+Without the file, and with a file that holds no usable action either, there is nothing the tab could
+show, so it is not offered at all and the menu has the three lists it always had - `CVARS`,
+`COMMANDS`, `ACTIONS`. Every attempt to read the file says what came of it: the first one of a session
+and every one that says something new go to the console, a repeat of the last one only to the log with
+`developer 1` set, so that opening the menu again does not fill the console with the same line. The
+file is read every time the menu is opened, so one put in place - or taken away - after the menu was
+first opened is picked up by closing and opening it, and a change to a file that is already there by
+an `internal ... = #reload` action or by reopening the menu.
 
 ## Debug Free Camera
 

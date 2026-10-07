@@ -20,6 +20,7 @@
 #include "framework/Console.h"
 #include "framework/DeclManager.h"
 #include "framework/EditField.h"
+#include "framework/FileSystem.h"
 #include "framework/KeyInput.h"
 #include "framework/Session.h"
 #include "renderer/RenderSystem.h"
@@ -546,10 +547,11 @@ typedef enum {
 	DM_LIST_CVARS = 0,
 	DM_LIST_COMMANDS,
 	DM_LIST_ACTIONS,
+	DM_LIST_CUSTOM,			// filled from dmCustomActions.cfg, hidden while there is none
 	DM_LIST_NUM
 } dmList_t;
 
-static const char *dmListNames[DM_LIST_NUM] = { "CVARS", "COMMANDS", "ACTIONS" };
+static const char *dmListNames[DM_LIST_NUM] = { "CVARS", "COMMANDS", "ACTIONS", "CUSTOM ACTIONS" };
 
 typedef enum {
 	DM_ACTION_COMMAND = 0,		// target is a console command line
@@ -588,6 +590,39 @@ static const dmActionDef_t dmActions[] = {
 	{ "Close menu",			"#close",					DM_ACTION_INTERNAL }
 };
 static const int dmNumActions = sizeof( dmActions ) / sizeof( dmActions[0] );
+
+// ---------------------------------------------------------------------------
+// custom actions (dmCustomActions.cfg)
+// ---------------------------------------------------------------------------
+
+// The menu reads these out of a config file of its own, so the actions somebody
+// wants on the CUSTOM ACTIONS tab do not have to be written into the source. The
+// file is looked for in the config folder (fs_configpath) first and in the game
+// resources after that, and while there is no file, or none it could use, the
+// tab is not offered at all - the menu then has the three lists it always had.
+static const char *	DM_CUSTOM_FILE			= "dmCustomActions.cfg";
+static const int	DM_CUSTOM_MAX			= 64;		// actions the file may hold
+static const int	DM_CUSTOM_LABEL_MAX		= 64;		// characters of a label
+static const int	DM_CUSTOM_TARGET_MAX		= 192;		// characters of a target
+
+typedef struct {
+	idStr	label;
+	idStr	target;
+	int		kind;		// one of dmActionKind_t
+} dmCustomAction_t;
+
+// What the last load attempt found, so that a repeat of the same line can go to
+// the developer log instead of the console.
+typedef enum {
+	DM_CUSTOMLOG_NONE = -1,			// nothing tried yet
+	DM_CUSTOMLOG_MISSING = 0,		// no file
+	DM_CUSTOMLOG_EMPTY,				// a file without a usable action
+	DM_CUSTOMLOG_LOADED				// actions in hand
+} dmCustomLogState_t;
+
+// the "#..." codes the menu handles itself, the ones an internal action can use
+static const char *dmInternalCodes[] = { "#refresh", "#clearfilter", "#close", "#reload" };
+static const int dmNumInternalCodes = sizeof( dmInternalCodes ) / sizeof( dmInternalCodes[0] );
 
 class idDebugMenuLocal : public idDebugMenu {
 public:
@@ -672,6 +707,11 @@ private:
 	void					DrawCvarInfo( const char *name );
 	void					DrawCommandInfo( const char *name );
 	void					DrawActionInfo( int actionIndex );
+	void					DrawCustomActionInfo( int actionIndex );
+	void					DrawActionInfoBody( const char *label, int kind, const char *target, const char *note );
+
+	int						StepList( int delta ) const;
+	void					LoadCustomActions( bool verbose );
 
 	idStrList				listNames;			// everything in the current list, sorted
 	idList<int>				filtered;			// indices into listNames matching the filter
@@ -694,6 +734,13 @@ private:
 	bool					completeLive;		// the line came from the completion, not from typing
 	bool					completeNarrowed;	// the matches share this beginning
 									// and it is already in the line
+
+	// the actions read out of dmCustomActions.cfg: the CUSTOM ACTIONS tab holds
+	// them and is not offered while there are none
+	idList<dmCustomAction_t>customActions;
+	bool					customTab;
+	int						customLogState;		// what the last load attempt said
+	int						customLogNum;		// ... and how many actions it found
 
 
 	// gamepad: the buttons that open this menu together, and their state
@@ -770,6 +817,10 @@ idDebugMenuLocal::idDebugMenuLocal( void ) {
 		comboHoldFired[i] = false;
 	}
 
+	customTab = false;
+	customLogState = DM_CUSTOMLOG_NONE;
+	customLogNum = -1;
+
 	oskActive = false;
 	oskRow = 0;
 	oskCol = 0;
@@ -827,6 +878,8 @@ void idDebugMenuLocal::Shutdown( void ) {
 	editing = false;
 	listNames.Clear();
 	filtered.Clear();
+	customActions.Clear();
+	customTab = false;
 
 	// never leave a stopped game behind
 	SetGamePause( false );
@@ -952,6 +1005,12 @@ void idDebugMenuLocal::Open( const char *initialFilter ) {
 	status.Clear();
 
 	SetFilter( initialFilter ? initialFilter : "" );
+
+	// the config file is read again every time the menu comes up: a file that was
+	// put in place (or taken away) after the last look is picked up by closing
+	// and opening the menu, and the log says what came of it
+	LoadCustomActions( false );
+
 	RefreshLists();
 
 	SetGamePause( true );
@@ -1311,11 +1370,36 @@ void idDebugMenuLocal::SetList( int newList ) {
 	if ( newList < 0 || newList >= DM_LIST_NUM || newList == list ) {
 		return;
 	}
+	if ( newList == DM_LIST_CUSTOM && !customTab ) {
+		return;		// no config file, no such list
+	}
 	ClearMatches();
 	list = newList;
 	selection = 0;
 	scroll = 0;
 	RefreshLists();
+}
+
+/*
+================
+idDebugMenuLocal::StepList
+
+The list TAB and the DPad left/right walk to. The custom list is part of that
+walk only while it has something to show, so a menu without the config file has
+exactly the three lists it always had.
+================
+*/
+int idDebugMenuLocal::StepList( int delta ) const {
+	int	step = ( delta > 0 ) ? 1 : DM_LIST_NUM - 1;
+	int	l = list;
+
+	for ( int i = 0; i < DM_LIST_NUM; i++ ) {
+		l = ( l + step ) % DM_LIST_NUM;
+		if ( l != DM_LIST_CUSTOM || customTab ) {
+			return l;
+		}
+	}
+	return list;
 }
 
 /*
@@ -1349,6 +1433,12 @@ void idDebugMenuLocal::RefreshLists( void ) {
 			}
 			break;
 		}
+		case DM_LIST_CUSTOM: {
+			for ( i = 0; i < customActions.Num(); i++ ) {
+				listNames.Append( customActions[i].label );
+			}
+			break;
+		}
 		default: {
 			for ( i = 0; i < dmNumActions; i++ ) {
 				listNames.Append( idStr( dmActions[i].label ) );
@@ -1357,12 +1447,337 @@ void idDebugMenuLocal::RefreshLists( void ) {
 		}
 	}
 
-	// the hand written action list keeps its own order, everything else is sorted
-	if ( list != DM_LIST_ACTIONS && listNames.Num() > 1 ) {
+	// the hand written action list keeps its own order, and so does the config
+	// file: the order its author wrote down is the order he sees
+	if ( list != DM_LIST_ACTIONS && list != DM_LIST_CUSTOM && listNames.Num() > 1 ) {
 		listNames.Sort( &DM_StrListCompare );
 	}
 
 	filterDirty = true;
+}
+
+/*
+================
+DM_SkipSpace / DM_RTrim
+
+Helpers for the config file: the spaces around the kind, the label and the
+target do not matter, so every line is trimmed before it is looked at.
+================
+*/
+static char *DM_SkipSpace( char *text ) {
+	while ( *text && ( *text == ' ' || *text == '\t' ) ) {
+		text++;
+	}
+	return text;
+}
+
+static void DM_RTrim( char *text ) {
+	int	len = (int)strlen( text );
+
+	while ( len > 0 && ( text[len - 1] == ' ' || text[len - 1] == '\t' || text[len - 1] == '\r' ) ) {
+		text[--len] = '\0';
+	}
+}
+
+/*
+================
+DM_IsPlainAscii
+
+Everything the menu draws goes through "textures/bigchars", which has no glyph
+beyond plain ASCII, so a label or a target that carries anything else would come
+out as nonsense. Such a line is refused instead of being shown wrong.
+================
+*/
+static bool DM_IsPlainAscii( const char *text ) {
+	for ( int i = 0; text[i]; i++ ) {
+		unsigned char c = (unsigned char)text[i];
+		if ( c < 32 || c > 126 ) {
+			return false;
+		}
+	}
+	return true;
+}
+
+/*
+================
+DM_CustomKindFromName
+
+The kinds the hand written action list uses, under the names the config file
+writes them with. -1 for a kind the menu does not have.
+================
+*/
+static int DM_CustomKindFromName( const char *name ) {
+	if ( !idStr::Icmp( name, "command" ) || !idStr::Icmp( name, "cmd" ) ) {
+		return DM_ACTION_COMMAND;
+	}
+	if ( !idStr::Icmp( name, "cvarbool" ) || !idStr::Icmp( name, "toggle" ) ) {
+		return DM_ACTION_CVAR_BOOL;
+	}
+	if ( !idStr::Icmp( name, "internal" ) || !idStr::Icmp( name, "menu" ) ) {
+		return DM_ACTION_INTERNAL;
+	}
+	return -1;
+}
+
+/*
+================
+DM_IsInternalCode
+
+Only the codes the menu itself handles are worth writing into an internal
+action, so anything else is refused while the file is read rather than when
+somebody presses ENTER on it.
+================
+*/
+static bool DM_IsInternalCode( const char *target ) {
+	for ( int i = 0; i < dmNumInternalCodes; i++ ) {
+		if ( !idStr::Icmp( target, dmInternalCodes[i] ) ) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static void DM_CustomWarn( int lineNum, const char *message ) {
+	common->Warning( "%s:%d: %s", DM_CUSTOM_FILE, lineNum, message );
+}
+
+/*
+================
+idDebugMenuLocal::LoadCustomActions
+
+Reads dmCustomActions.cfg and fills the CUSTOM ACTIONS list with it. The file is
+looked for in the config folder first - fs_configpath, "~/.config/dhewm3" on
+Linux, the "My Games/dhewm3" folder in Documents on Windows - and in the game
+resources after that: base/, d3xp/, a mod or a pk4, packed or loose. A file of
+the user's own thus wins over one a game or a mod ships.
+
+A line of the file is
+
+	kind label = target
+
+with the kind one of "command" (a console command line), "cvarbool" (the name of
+a boolean CVar, which gets toggled) or "internal" (a "#..." code the menu
+handles), the label the menu shows and the target behind the "=". Empty lines
+and whole lines starting with "//" or "#" are comments; a line the menu cannot
+use is skipped, with the reason in the log.
+
+Without a file, and with a file that holds no usable action either, there is
+nothing the tab could show, so it is not offered at all. Every attempt reports
+what came of it: the first of a session and every one that says something new go
+to the console, a repeat of the last one only to the developer log, so that
+opening the menu again does not fill the log with the same line. A reload
+somebody asked for ("#reload") always reports.
+================
+*/
+void idDebugMenuLocal::LoadCustomActions( bool verbose ) {
+	char		line[512];
+	char		message[512];
+	dmCustomAction_t	action;
+	idStr		configPath;
+	idFile *	file;
+	char *		buffer;
+	char *		kindName;
+	char *		label;
+	char *		target;
+	char *		equal;
+	char *		p;
+	char *		lineEnd;
+	const char *	where;
+	int			len, read, lineNum, lineLen, kind, i, state;
+	bool		inConfigFolder, found, overCapacity, duplicate;
+
+	customActions.Clear();
+	customTab = false;
+	found = false;
+	inConfigFolder = false;
+	buffer = NULL;
+
+	// the config folder first: a file kept there is meant to win over one that
+	// comes with the game
+	configPath = cvarSystem->GetCVarString( "fs_configpath" );
+	configPath.StripTrailing( PATHSEPERATOR_CHAR );
+	if ( configPath.Length() > 0 ) {
+		configPath += PATHSEPERATOR_CHAR;
+		configPath += DM_CUSTOM_FILE;
+		file = fileSystem->OpenExplicitFileRead( configPath.c_str() );
+		if ( file != NULL ) {
+			found = true;
+			inConfigFolder = true;
+		}
+	} else {
+		// without a config path only the game resources are left
+		file = NULL;
+		configPath = "(fs_configpath is not set)";
+	}
+
+	if ( file == NULL ) {
+		// then wherever the search path of the engine reaches, which is where
+		// base/ and d3xp/ are
+		file = fileSystem->OpenFileRead( DM_CUSTOM_FILE );
+		if ( file != NULL ) {
+			found = true;
+		}
+	}
+
+	if ( file != NULL ) {
+		len = file->Length();
+		if ( len > 0 ) {
+			buffer = (char *)Mem_Alloc( len + 1 );
+			read = file->Read( buffer, len );
+			buffer[read] = '\0';
+		}
+		fileSystem->CloseFile( file );
+	}
+
+	overCapacity = false;
+	if ( buffer != NULL ) {
+		p = buffer;
+		lineNum = 0;
+
+		while ( *p ) {
+			lineEnd = strchr( p, '\n' );
+			lineNum++;
+			if ( lineEnd != NULL ) {
+				lineLen = (int)( lineEnd - p );
+			} else {
+				lineLen = (int)strlen( p );
+			}
+
+			if ( lineLen > (int)sizeof( line ) - 1 ) {
+				DM_CustomWarn( lineNum, "line is too long - line skipped" );
+				if ( lineEnd == NULL ) {
+					break;
+				}
+				p = lineEnd + 1;
+				continue;
+			}
+
+			memcpy( line, p, lineLen );
+			line[lineLen] = '\0';
+			p = ( lineEnd != NULL ) ? lineEnd + 1 : p + lineLen;
+
+			DM_RTrim( line );
+			label = DM_SkipSpace( line );
+
+			// a whole line is a comment: a command line behind the "=" may hold
+			// anything, so there are no comments there
+			if ( !label[0] || ( label[0] == '/' && label[1] == '/' ) || label[0] == '#' ) {
+				continue;
+			}
+
+			// "kind label = target"
+			equal = strchr( label, '=' );
+			if ( equal == NULL ) {
+				DM_CustomWarn( lineNum, "no '=' - the line has to read kind label = target - line skipped" );
+				continue;
+			}
+			*equal = '\0';
+			target = DM_SkipSpace( equal + 1 );
+			DM_RTrim( target );
+			DM_RTrim( label );
+
+			kindName = label;
+			while ( *label && *label != ' ' && *label != '\t' ) {
+				label++;
+			}
+			if ( *label ) {
+				*label = '\0';
+				label = DM_SkipSpace( label + 1 );
+			} else {
+				label = NULL;
+			}
+
+			if ( label == NULL || !label[0] ) {
+				DM_CustomWarn( lineNum, "no label - line skipped" );
+				continue;
+			}
+			if ( !target[0] ) {
+				DM_CustomWarn( lineNum, "no target behind '=' - line skipped" );
+				continue;
+			}
+			if ( !DM_IsPlainAscii( label ) || !DM_IsPlainAscii( target ) ) {
+				DM_CustomWarn( lineNum, "only plain ASCII can be drawn - line skipped" );
+				continue;
+			}
+
+			kind = DM_CustomKindFromName( kindName );
+			if ( kind < 0 ) {
+				DM_CustomWarn( lineNum, va( "unknown kind '%s' (command, cvarbool, internal) - line skipped", kindName ) );
+				continue;
+			}
+			if ( kind == DM_ACTION_INTERNAL && !DM_IsInternalCode( target ) ) {
+				DM_CustomWarn( lineNum, va( "the menu has no code '%s' - line skipped", target ) );
+				continue;
+			}
+			if ( (int)strlen( target ) > DM_CUSTOM_TARGET_MAX - 1 ) {
+				DM_CustomWarn( lineNum, va( "target longer than %d characters - line skipped", DM_CUSTOM_TARGET_MAX - 1 ) );
+				continue;
+			}
+
+			if ( customActions.Num() >= DM_CUSTOM_MAX ) {
+				if ( !overCapacity ) {
+					common->Warning( "%s: more than %d actions, the rest of the file is skipped", DM_CUSTOM_FILE, DM_CUSTOM_MAX );
+					overCapacity = true;
+				}
+				continue;
+			}
+
+			duplicate = false;
+			for ( i = 0; i < customActions.Num(); i++ ) {
+				if ( !idStr::Icmp( customActions[i].label.c_str(), label ) ) {
+					duplicate = true;
+					break;
+				}
+			}
+			if ( duplicate ) {
+				DM_CustomWarn( lineNum, va( "'%s' is on the list twice - line skipped", label ) );
+				continue;
+			}
+
+			action.label = label;
+			if ( action.label.Length() > DM_CUSTOM_LABEL_MAX - 1 ) {
+				action.label.CapLength( DM_CUSTOM_LABEL_MAX - 1 );
+				DM_CustomWarn( lineNum, va( "label cut short to %d characters", DM_CUSTOM_LABEL_MAX - 1 ) );
+			}
+			action.target = target;
+			action.kind = kind;
+			customActions.Append( action );
+		}
+
+		Mem_Free( buffer );
+	}
+
+	customTab = ( customActions.Num() > 0 );
+
+	if ( !customTab && list == DM_LIST_CUSTOM ) {
+		// the list the tab was showing is gone, so go back to one that is there
+		list = DM_LIST_CVARS;
+		selection = 0;
+		scroll = 0;
+	}
+
+	if ( customTab ) {
+		state = DM_CUSTOMLOG_LOADED;
+	} else {
+		state = found ? DM_CUSTOMLOG_EMPTY : DM_CUSTOMLOG_MISSING;
+	}
+
+	where = inConfigFolder ? configPath.c_str() : "the game resources";
+	if ( customTab ) {
+		sprintf( message, "%s: %d custom actions loaded from %s", DM_CUSTOM_FILE, customActions.Num(), where );
+	} else if ( found ) {
+		sprintf( message, "%s: found in %s, but it holds no usable action - the CUSTOM ACTIONS tab stays hidden", DM_CUSTOM_FILE, where );
+	} else {
+		sprintf( message, "%s: not found - looked in %s and in the game resources (base/, d3xp/, a mod, a pk4) - the CUSTOM ACTIONS tab stays hidden", DM_CUSTOM_FILE, configPath.c_str() );
+	}
+
+	if ( verbose || state != customLogState || customActions.Num() != customLogNum ) {
+		common->Printf( "%s\n", message );
+	} else {
+		common->DPrintf( "%s\n", message );
+	}
+	customLogState = state;
+	customLogNum = customActions.Num();
 }
 
 /*
@@ -1801,11 +2216,11 @@ void idDebugMenuLocal::JoyKeyEvent( int key ) {
 	// complete the line
 	if ( !editing && !MatchesActive() ) {
 		if ( key == K_JOY_DPAD_LEFT ) {
-			SetList( ( list + DM_LIST_NUM - 1 ) % DM_LIST_NUM );
+			SetList( StepList( -1 ) );
 			return;
 		}
 		if ( key == K_JOY_DPAD_RIGHT ) {
-			SetList( ( list + 1 ) % DM_LIST_NUM );
+			SetList( StepList( 1 ) );
 			return;
 		}
 	}
@@ -2159,9 +2574,9 @@ void idDebugMenuLocal::KeyDownEvent( int key ) {
 			if ( dm_tabCompletesFilter.GetBool() && !idKeyInput::IsDown( K_CTRL ) ) {
 				CompleteEdit();
 			} else if ( idKeyInput::IsDown( K_SHIFT ) ) {
-				SetList( ( list + DM_LIST_NUM - 1 ) % DM_LIST_NUM );
+				SetList( StepList( -1 ) );
 			} else {
-				SetList( ( list + 1 ) % DM_LIST_NUM );
+				SetList( StepList( 1 ) );
 			}
 			break;
 		case K_BACKSPACE:
@@ -2225,6 +2640,23 @@ void idDebugMenuLocal::ExecuteSelected( void ) {
 		return;
 	}
 
+	if ( list == DM_LIST_CUSTOM ) {
+		// the config file names the very same kinds the hand written list uses,
+		// so an action out of it runs through the same path
+		int customIndex = SelectedListIndex();
+		dmActionDef_t action;
+
+		if ( customIndex < 0 || customIndex >= customActions.Num() ) {
+			SetStatus( "nothing selected" );
+			return;
+		}
+		action.label = customActions[customIndex].label.c_str();
+		action.target = customActions[customIndex].target.c_str();
+		action.kind = customActions[customIndex].kind;
+		RunAction( action );
+		return;
+	}
+
 	int index = SelectedListIndex();
 	if ( index >= 0 && index < dmNumActions ) {
 		RunAction( dmActions[index] );
@@ -2267,6 +2699,12 @@ void idDebugMenuLocal::RunAction( const dmActionDef_t &action ) {
 				SetStatus( "filter cleared" );
 			} else if ( idStr::Icmp( action.target, "#close" ) == 0 ) {
 				Close();
+			} else if ( idStr::Icmp( action.target, "#reload" ) == 0 ) {
+				// read dmCustomActions.cfg over again: that is what a config file
+				// being worked on needs, and the log always says what came of it
+				LoadCustomActions( true );
+				RefreshLists();
+				SetStatus( va( "%d custom actions", customActions.Num() ) );
 			}
 			break;
 		}
@@ -2696,7 +3134,12 @@ void idDebugMenuLocal::Draw( void ) {
 	// list tabs
 	x = 1;
 	for ( i = 0; i < DM_LIST_NUM; i++ ) {
-		bool isCurrent = ( i == list );
+		bool isCurrent;
+
+		if ( i == DM_LIST_CUSTOM && !customTab ) {
+			continue;		// no config file, so no tab to offer
+		}
+		isCurrent = ( i == list );
 		if ( isCurrent ) {
 			sprintf( buffer, "[%s]", dmListNames[i] );
 		} else {
@@ -2739,6 +3182,8 @@ void idDebugMenuLocal::Draw( void ) {
 				DrawCvarInfo( name );
 			} else if ( list == DM_LIST_COMMANDS ) {
 				DrawCommandInfo( name );
+			} else if ( list == DM_LIST_CUSTOM ) {
+				DrawCustomActionInfo( SelectedListIndex() );
 			} else {
 				DrawActionInfo( SelectedListIndex() );
 			}
@@ -2809,6 +3254,8 @@ void idDebugMenuLocal::DrawList( void ) {
 				}
 			} else if ( list == DM_LIST_ACTIONS && listIndex < dmNumActions ) {
 				idStr::Copynz( value, dmActions[listIndex].target ? dmActions[listIndex].target : "", sizeof( value ) );
+			} else if ( list == DM_LIST_CUSTOM && listIndex < customActions.Num() ) {
+				idStr::Copynz( value, customActions[listIndex].target.c_str(), sizeof( value ) );
 			}
 		}
 
@@ -2993,46 +3440,44 @@ void idDebugMenuLocal::DrawCommandInfo( const char *name ) {
 
 /*
 ================
-idDebugMenuLocal::DrawActionInfo
+idDebugMenuLocal::DrawActionInfoBody
+
+The details of an action, wherever it came from: what it is, what it does and,
+for one that came out of the config file, the note saying so.
 ================
 */
-void idDebugMenuLocal::DrawActionInfo( int actionIndex ) {
+void idDebugMenuLocal::DrawActionInfoBody( const char *label, int kind, const char *target, const char *note ) {
 	char	buffer[512];
 	char	temp[128];
 	const char *desc;
 
-	if ( actionIndex < 0 || actionIndex >= dmNumActions ) {
-		return;
-	}
+	DrawTextClipped( 1, DM_ROW_INFO, label ? label : "", DM_COLOR_TITLE, DM_COLS - 2 );
 
-	const dmActionDef_t &action = dmActions[actionIndex];
-
-	DrawTextClipped( 1, DM_ROW_INFO, action.label, DM_COLOR_TITLE, DM_COLS - 2 );
-
-	switch ( action.kind ) {
+	switch ( kind ) {
 		case DM_ACTION_COMMAND:
-			sprintf( buffer, "console command: %s", action.target ? action.target : "" );
+			sprintf( buffer, "console command: %s", target ? target : "" );
 			break;
 		case DM_ACTION_CVAR_BOOL:
-			sprintf( buffer, "toggles CVar: %s = %s", action.target ? action.target : "",
-					cvarSystem->GetCVarString( action.target ? action.target : "" ) );
+			sprintf( buffer, "toggles CVar: %s = %s", target ? target : "",
+					cvarSystem->GetCVarString( target ? target : "" ) );
 			break;
 		default:
-			sprintf( buffer, "menu action: %s", action.target ? action.target : "" );
+			sprintf( buffer, "menu action: %s", target ? target : "" );
 			break;
 	}
 	DrawTextClipped( 1, DM_ROW_VALUE, buffer, DM_COLOR_TEXT, DM_COLS - 2 );
 
-	if ( action.kind == DM_ACTION_COMMAND ) {
+	if ( kind == DM_ACTION_COMMAND ) {
 		desc = "Runs right away through the command buffer.";
-	} else if ( action.kind == DM_ACTION_CVAR_BOOL ) {
+	} else if ( kind == DM_ACTION_CVAR_BOOL ) {
 		desc = "Flips the value of an engine CVar.";
 	} else {
 		desc = "Handled inside the debug menu.";
 	}
 
-	// the description, up to three lines of it, the ENTER hint in the first
-	// line the text did not need
+	// the description, up to three lines of it, then the ENTER hint and, for an
+	// action that came out of the config file, the note saying so - in the lines
+	// the text did not need
 	{
 		const char *rest = desc;
 		int row;
@@ -3043,6 +3488,35 @@ void idDebugMenuLocal::DrawActionInfo( int actionIndex ) {
 		}
 		if ( row <= DM_ROW_DESC3 ) {
 			DrawText( 1, row, "ENTER executes", DM_COLOR_TEXT );
+			row++;
+		}
+		if ( note != NULL && row <= DM_ROW_DESC3 ) {
+			DrawTextClipped( 1, row, note, DM_COLOR_DIM, DM_COLS - 2 );
 		}
 	}
+}
+
+/*
+================
+idDebugMenuLocal::DrawActionInfo
+================
+*/
+void idDebugMenuLocal::DrawActionInfo( int actionIndex ) {
+	if ( actionIndex < 0 || actionIndex >= dmNumActions ) {
+		return;
+	}
+	DrawActionInfoBody( dmActions[actionIndex].label, dmActions[actionIndex].kind, dmActions[actionIndex].target, NULL );
+}
+
+/*
+================
+idDebugMenuLocal::DrawCustomActionInfo
+================
+*/
+void idDebugMenuLocal::DrawCustomActionInfo( int actionIndex ) {
+	if ( actionIndex < 0 || actionIndex >= customActions.Num() ) {
+		return;
+	}
+	DrawActionInfoBody( customActions[actionIndex].label.c_str(), customActions[actionIndex].kind,
+						customActions[actionIndex].target.c_str(), "From dmCustomActions.cfg." );
 }

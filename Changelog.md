@@ -59,6 +59,10 @@ Fork Changes
   - it is engine code and not game code: `neo/framework/DebugMenu.cpp`, compiled into the executable
     with the rest of `framework/`, so no game module is involved and the same menu serves the base
     game, RoE and mods
+  - custom actions: a `dmCustomActions.cfg` file, in the config folder or in the game resources, fills
+    a tab of its own (`CUSTOM ACTIONS`, after `ACTIONS`) with commands, CVars and menu codes of your
+    own; without the file, or with one that holds nothing usable, the tab stays hidden, and every
+    attempt to read it and what came of it go to the log (see `ForkNewFeatures.md`)
 
 * Implemented free (debug) camera (also works in cinematics): via 'freeCam' command or 'dbg_freeCam' CVar (1: freeze the camera, 2: full flight mode)
   - `freeCam 0|1|2`, `freeCam here`, `freeCam pos <x> <y> <z>`, `freeCam angles <p> <y> <r>`,
